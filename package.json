@@ -1,0 +1,9 @@
+{
+  "name": "lotofacil-astro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extrair": "node auditoria/extrair-motor.mjs",
+    "auditoria": "node auditoria/extrair-motor.mjs && node auditoria/validar.mjs"
+  }
+}
