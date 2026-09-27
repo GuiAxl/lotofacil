@@ -240,15 +240,18 @@ export function simular(concursos, opcoes = {}) {
   const { minTreino = 30, motores = Object.keys(MOTORES) } = opcoes;
   const ordenados = [...concursos].sort((a, b) => a.concurso - b.concurso);
   const estado = criarEstado();
-  const saida = Object.fromEntries(motores.map(m => [m, { acertos: [], concursos: [] }]));
+  const saida = Object.fromEntries(motores.map(m => [m, { acertos: [], concursos: [], registros: [] }]));
   const perda = { astral: 0, referencia: 0, uniforme: 0, n: 0 };
   const trilha = [];
   for (const c of ordenados) {
     if (c.resultado && c.chaves && estado.nMapas >= minTreino) {
       for (const m of motores) {
         const prev = prever(estado, c, m);
-        saida[m].acertos.push(acertos(prev.jogo, c.resultado));
+        const a = acertos(prev.jogo, c.resultado);
+        saida[m].acertos.push(a);
         saida[m].concursos.push(c.concurso);
+        // Registro para as métricas científicas (probabilidades só no Astral).
+        saida[m].registros.push({ concurso: c.concurso, probs: m === "astral" ? prev.valores : null, sorteio: c.resultado, jogo: prev.jogo, acertos: a });
         if (m === "astral") {
           perda.astral += perdaLog(prev.valores, c.resultado);
           perda.uniforme += perdaLog(new Array(26).fill(P0), c.resultado);

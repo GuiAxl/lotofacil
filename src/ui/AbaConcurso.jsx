@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { T, Card, Botao, Chip, Rotulo, Bolinhas, BarrasProbabilidade, Tabela, Aviso, Metrica, estiloInput } from "./base.jsx";
-import { interpretarMapa, formatarNum, pct, dec } from "./estado.js";
+import { interpretarMapa, formatarNum, pct, dec, estimarProximo } from "./estado.js";
 import { nomePonto, nomeSigno, PONTOS_OBRIGATORIOS, TIPO_CASA } from "../astro/constantes.js";
 import { dignidade, classeVelocidade } from "../astro/sinais.js";
 import { MOTORES, APRENDIZES, treinarAte, preverTodos, explicarNumero, pesosMistura } from "../estatistica/motor.js";
@@ -59,8 +59,8 @@ function PreviaMapa({ leitura }) {
 }
 
 export default function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
-  const ultimo = concursos.length ? concursos[concursos.length - 1].concurso : 3770;
-  const [numero, setNumero] = useState(String(inicial ?? ultimo + 1));
+  const proximoEstimado = estimarProximo(app.resultados);
+  const [numero, setNumero] = useState(String(inicial ?? proximoEstimado.concurso));
   const [data, setData] = useState("");
   const [texto, setTexto] = useState("");
   const [previsao, setPrevisao] = useState(null);
@@ -75,7 +75,7 @@ export default function AbaConcurso({ app, concursos, meta, acoes, simulacao, in
   useEffect(() => {
     // Só troca o texto se este concurso já tem mapa salvo: não apaga um mapa colado antes de digitar o número.
     if (app.mapas[nConc]) setTexto(app.mapas[nConc].texto);
-    setData(app.mapas[nConc]?.data || app.resultados.find(r => r.concurso === nConc)?.data || "");
+    setData(app.mapas[nConc]?.data || app.resultados.find(r => r.concurso === nConc)?.data || (nConc === proximoEstimado.concurso ? proximoEstimado.data : ""));
     setPrevisao(null); setNumSel(null);
   }, [nConc]);
 
@@ -89,7 +89,9 @@ export default function AbaConcurso({ app, concursos, meta, acoes, simulacao, in
       const estado = treinarAte(concursos, nConc);
       const chaves = leitura.sinais.filter(s => app.config.usarLentos || !s.lento).map(s => s.chave);
       const alvo = { concurso: nConc, chaves };
-      setPrevisao({ estado, chaves, porMotor: preverTodos(estado, alvo), treino: estado.nMapas });
+      // Contexto novo (OOD): sinais deste mapa com pouca ou nenhuma história.
+      const novos = chaves.filter(k => (estado.sinais.get(k)?.dias || 0) < 5).length;
+      setPrevisao({ estado, chaves, porMotor: preverTodos(estado, alvo), treino: estado.nMapas, novidade: chaves.length ? novos / chaves.length : 0 });
       setCalculando(false);
     }, 30);
   };
@@ -113,7 +115,7 @@ export default function AbaConcurso({ app, concursos, meta, acoes, simulacao, in
       <Card titulo="Mapa do concurso">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
           <div><Rotulo>Concurso</Rotulo><input style={estiloInput} value={numero} onChange={e => setNumero(e.target.value.replace(/\D/g, ""))} /></div>
-          <div><Rotulo>Data (dd/mm/aaaa)</Rotulo><input style={estiloInput} value={data} placeholder="27/09/2026" onChange={e => setData(e.target.value)} /></div>
+          <div><Rotulo>Data (dd/mm/aaaa){nConc === proximoEstimado.concurso ? " · estimada" : ""}</Rotulo><input style={estiloInput} value={data} placeholder="27/09/2026" onChange={e => setData(e.target.value)} /></div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6, flexWrap: "wrap" }}>
             {resultado ? <Chip tom="bom">resultado conhecido</Chip> : <Chip tom="ouro">sorteio futuro</Chip>}
             {salvo && <Chip>mapa salvo</Chip>}
@@ -137,6 +139,7 @@ export default function AbaConcurso({ app, concursos, meta, acoes, simulacao, in
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
             <Metrica rotulo="Confiança nos sinais astrais" valor={pct(astral.pesoAstral)} detalhe="peso dos modelos com sinais na mistura" tom={astral.pesoAstral > 0.5 ? "bom" : undefined} />
             <Metrica rotulo="Sinais usados" valor={previsao.chaves.length} />
+            <Metrica rotulo="Contexto novo" valor={pct(previsao.novidade)} detalhe="sinais com menos de 5 dias de história" tom={previsao.novidade > 0.3 ? "alerta" : undefined} />
             <Metrica rotulo="Acerto esperado (Astral)" valor={dec(astral.jogo.reduce((s, n) => s + astral.valores[n], 0), 2)} detalhe="soma das probabilidades dos 15 (acaso = 9,00)" />
           </div>
           <Rotulo>Probabilidade de cada número (Astral) — clique para ver os sinais</Rotulo>

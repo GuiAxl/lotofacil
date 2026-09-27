@@ -1,6 +1,6 @@
 // Lotofácil Astro v13 — Observatório. Arquivo gerado por scripts/build.mjs a partir de src/.
 // Não edite aqui: edite src/ e rode "npm run build".
-import { useState as useState9, useEffect as useEffect3, useMemo as useMemo7, useRef, useState, useState as useState2, useEffect, useMemo, useState as useState3, useMemo as useMemo2, useState as useState4, useMemo as useMemo3, useState as useState5, useMemo as useMemo4, useState as useState6, useMemo as useMemo5, useState as useState7, useState as useState8, useMemo as useMemo6, useEffect as useEffect2 } from "react";
+import { useState as useState10, useEffect as useEffect3, useMemo as useMemo7, useRef, useState, useState as useState2, useEffect, useMemo, useState as useState3, useMemo as useMemo2, useState as useState4, useMemo as useMemo3, useState as useState5, useMemo as useMemo4, useState as useState7, useMemo as useMemo5, useState as useState6, useState as useState8, useState as useState9, useMemo as useMemo6, useEffect as useEffect2 } from "react";
 // src/App.jsx
 
 // src/ui/base.jsx
@@ -4354,8 +4354,26 @@ function estadoInicial() {
     mapas: {},
     hipoteses: [],
     diario: [],
+    correcoes: {},
     config: { usarLentos: false, minTreino: 30 }
   };
+}
+function aplicarCorrecoes(resultados, correcoes = {}) {
+  if (!correcoes || !Object.keys(correcoes).length) return resultados;
+  return resultados.map((r) => correcoes[r.concurso] ? { ...r, resultado: correcoes[r.concurso].resultado, corrigido: true, original: r.resultado } : r);
+}
+function estimarProximo(resultados) {
+  const ultimo = resultados[resultados.length - 1];
+  const m = String(ultimo?.data || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  let data = "";
+  if (m) {
+    const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+    do
+      d.setUTCDate(d.getUTCDate() + 1);
+    while (d.getUTCDay() === 0);
+    data = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+  }
+  return { concurso: (ultimo?.concurso || 0) + 1, data };
 }
 async function carregar() {
   try {
@@ -4388,6 +4406,7 @@ function mesclarComInicial(salvo) {
     mapas: salvo.mapas || {},
     hipoteses: salvo.hipoteses || [],
     diario: salvo.diario || [],
+    correcoes: salvo.correcoes || {},
     config: { ...base.config, ...salvo.config || {} }
   };
 }
@@ -4966,15 +4985,17 @@ function simular(concursos, opcoes = {}) {
   const { minTreino = 30, motores = Object.keys(MOTORES) } = opcoes;
   const ordenados = [...concursos].sort((a, b) => a.concurso - b.concurso);
   const estado = criarEstado();
-  const saida = Object.fromEntries(motores.map((m) => [m, { acertos: [], concursos: [] }]));
+  const saida = Object.fromEntries(motores.map((m) => [m, { acertos: [], concursos: [], registros: [] }]));
   const perda = { astral: 0, referencia: 0, uniforme: 0, n: 0 };
   const trilha = [];
   for (const c of ordenados) {
     if (c.resultado && c.chaves && estado.nMapas >= minTreino) {
       for (const m of motores) {
         const prev = prever(estado, c, m);
-        saida[m].acertos.push(acertos(prev.jogo, c.resultado));
+        const a = acertos(prev.jogo, c.resultado);
+        saida[m].acertos.push(a);
         saida[m].concursos.push(c.concurso);
+        saida[m].registros.push({ concurso: c.concurso, probs: m === "astral" ? prev.valores : null, sorteio: c.resultado, jogo: prev.jogo, acertos: a });
         if (m === "astral") {
           perda.astral += perdaLog(prev.valores, c.resultado);
           perda.uniforme += perdaLog(new Array(26).fill(P0), c.resultado);
@@ -5086,24 +5107,55 @@ function avaliarHipotese(h, concursos) {
   const pValor = tentativas ? h.direcao === "mais" ? pBinomialSuperior(acertosN, tentativas) : pBinomialSuperior(tentativas - acertosN, tentativas, 1 - P0) : null;
   return { status, decididaNo, llr, limiteA, limiteB, tentativas, acertos: acertosN, taxa: tentativas ? acertosN / tentativas : null, pValor, concursos: usados };
 }
-async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null }) {
-  const base = { concurso, motor, jogo: [...jogo].sort((a, b) => a - b), pesoAstral, registradoEm: (/* @__PURE__ */ new Date()).toISOString() };
+async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null }) {
+  const base = {
+    concurso,
+    motor,
+    jogo: [...jogo].sort((a, b) => a - b),
+    pesoAstral,
+    probs: probs ? Array.from({ length: 25 }, (_, i) => Math.round(probs[i + 1] * 1e5) / 1e5) : null,
+    registradoEm: (/* @__PURE__ */ new Date()).toISOString()
+  };
   return { id: `dia_${Date.now().toString(36)}_${motor}`, ...base, hash: await hashConteudo(base) };
 }
 function placarDiario(diario, resultadosPorConcurso) {
   const porMotor = {};
-  for (const r of diario) {
+  const primeira = /* @__PURE__ */ new Map();
+  for (const r of [...diario].sort((a, b) => a.registradoEm.localeCompare(b.registradoEm))) {
+    const k = `${r.concurso}|${r.motor}`;
+    if (!primeira.has(k)) primeira.set(k, r);
+  }
+  for (const r of primeira.values()) {
     const res = resultadosPorConcurso.get(r.concurso);
-    const linha = porMotor[r.motor] ||= { jogos: 0, apurados: 0, soma: 0, lista: [] };
-    linha.jogos++;
-    if (res) {
-      const a = acertos(r.jogo, res);
-      linha.apurados++;
-      linha.soma += a;
-      linha.lista.push({ concurso: r.concurso, acertos: a });
+    const l = porMotor[r.motor] ||= { jogos: 0, apurados: 0, soma: 0, lista: [], somaBrier: 0, somaLog: 0, comProbs: 0 };
+    l.jogos++;
+    if (!res) continue;
+    const a = acertos(r.jogo, res);
+    l.apurados++;
+    l.soma += a;
+    l.lista.push({ concurso: r.concurso, acertos: a });
+    if (r.probs) {
+      const s = new Set(res);
+      let b = 0, lg = 0;
+      r.probs.forEach((p, i) => {
+        const y = s.has(i + 1) ? 1 : 0;
+        b += (p - y) ** 2;
+        const q = Math.min(1 - 1e-9, Math.max(1e-9, p));
+        lg -= y ? Math.log(q) : Math.log(1 - q);
+      });
+      l.somaBrier += b / 25;
+      l.somaLog += lg / 25;
+      l.comProbs++;
     }
   }
-  for (const l of Object.values(porMotor)) l.media = l.apurados ? l.soma / l.apurados : null;
+  for (const l of Object.values(porMotor)) {
+    l.lista.sort((a, b) => a.concurso - b.concurso);
+    l.media = l.apurados ? l.soma / l.apurados : null;
+    l.z = l.apurados ? (l.media - 9) / 0.949 * Math.sqrt(l.apurados) : null;
+    l.ganhoBrier = l.comProbs ? 1 - l.somaBrier / l.comProbs / (P0 * (1 - P0)) : null;
+    l.ganhoLog = l.comProbs ? -(P0 * Math.log(P0) + (1 - P0) * Math.log(1 - P0)) - l.somaLog / l.comProbs : null;
+    l.confiancaProducao = l.apurados < 30 ? "amostra pequena" : l.z > 2 && (l.ganhoLog == null || l.ganhoLog > 0) ? "vantagem real" : "sem vantagem";
+  }
   return porMotor;
 }
 
@@ -5161,8 +5213,8 @@ function PreviaMapa({ leitura }) {
     </>;
 }
 function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
-  const ultimo = concursos.length ? concursos[concursos.length - 1].concurso : 3770;
-  const [numero, setNumero] = useState2(String(inicial ?? ultimo + 1));
+  const proximoEstimado = estimarProximo(app.resultados);
+  const [numero, setNumero] = useState2(String(inicial ?? proximoEstimado.concurso));
   const [data, setData] = useState2("");
   const [texto, setTexto] = useState2("");
   const [previsao, setPrevisao] = useState2(null);
@@ -5174,7 +5226,7 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
   const salvo = app.mapas[nConc];
   useEffect(() => {
     if (app.mapas[nConc]) setTexto(app.mapas[nConc].texto);
-    setData(app.mapas[nConc]?.data || app.resultados.find((r) => r.concurso === nConc)?.data || "");
+    setData(app.mapas[nConc]?.data || app.resultados.find((r) => r.concurso === nConc)?.data || (nConc === proximoEstimado.concurso ? proximoEstimado.data : ""));
     setPrevisao(null);
     setNumSel(null);
   }, [nConc]);
@@ -5187,7 +5239,8 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
       const estado = treinarAte(concursos, nConc);
       const chaves = leitura.sinais.filter((s) => app.config.usarLentos || !s.lento).map((s) => s.chave);
       const alvo = { concurso: nConc, chaves };
-      setPrevisao({ estado, chaves, porMotor: preverTodos(estado, alvo), treino: estado.nMapas });
+      const novos = chaves.filter((k) => (estado.sinais.get(k)?.dias || 0) < 5).length;
+      setPrevisao({ estado, chaves, porMotor: preverTodos(estado, alvo), treino: estado.nMapas, novidade: chaves.length ? novos / chaves.length : 0 });
       setCalculando(false);
     }, 30);
   };
@@ -5208,7 +5261,7 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
       <Card titulo="Mapa do concurso">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 10 }}>
           <div><Rotulo>Concurso</Rotulo><input style={estiloInput} value={numero} onChange={(e) => setNumero(e.target.value.replace(/\D/g, ""))} /></div>
-          <div><Rotulo>Data (dd/mm/aaaa)</Rotulo><input style={estiloInput} value={data} placeholder="27/09/2026" onChange={(e) => setData(e.target.value)} /></div>
+          <div><Rotulo>Data (dd/mm/aaaa){nConc === proximoEstimado.concurso ? " · estimada" : ""}</Rotulo><input style={estiloInput} value={data} placeholder="27/09/2026" onChange={(e) => setData(e.target.value)} /></div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 6, flexWrap: "wrap" }}>
             {resultado ? <Chip tom="bom">resultado conhecido</Chip> : <Chip tom="ouro">sorteio futuro</Chip>}
             {salvo && <Chip>mapa salvo</Chip>}
@@ -5236,6 +5289,7 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
             <Metrica rotulo="Confiança nos sinais astrais" valor={pct(astral.pesoAstral)} detalhe="peso dos modelos com sinais na mistura" tom={astral.pesoAstral > 0.5 ? "bom" : void 0} />
             <Metrica rotulo="Sinais usados" valor={previsao.chaves.length} />
+            <Metrica rotulo="Contexto novo" valor={pct(previsao.novidade)} detalhe="sinais com menos de 5 dias de história" tom={previsao.novidade > 0.3 ? "alerta" : void 0} />
             <Metrica rotulo="Acerto esperado (Astral)" valor={dec(astral.jogo.reduce((s, n) => s + astral.valores[n], 0), 2)} detalhe="soma das probabilidades dos 15 (acaso = 9,00)" />
           </div>
           <Rotulo>Probabilidade de cada número (Astral) — clique para ver os sinais</Rotulo>
@@ -5282,14 +5336,18 @@ function AbaHistorico({ app, acoes, abrirConcurso }) {
   const [filtro, setFiltro] = useState3("todos");
   const [limite, setLimite] = useState3(40);
   const numerosNovo = parseNumeros(novo.numeros);
-  const podeSalvar = Number(novo.concurso) > 0 && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
+  const jaExisteOficial = app.resultados.some((r) => r.concurso === Number(novo.concurso));
+  const podeSalvar = Number(novo.concurso) > 0 && !jaExisteOficial && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
+  const [corrigindo, setCorrigindo] = useState3(null);
+  const numerosCorrecao = corrigindo ? parseNumeros(corrigindo.numeros) : [];
+  const correcoes = Object.entries(app.correcoes || {});
   const linhas = useMemo2(() => {
     const porConcurso = new Map(app.resultados.map((r) => [r.concurso, r]));
     const todos = /* @__PURE__ */ new Set([...porConcurso.keys(), ...Object.keys(app.mapas).map(Number)]);
     return [...todos].sort((a, b) => b - a).map((c) => {
       const r = porConcurso.get(c);
       const m = app.mapas[c];
-      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, mapa: m, get leitura() {
+      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, corrigido: r?.corrigido, mapa: m, get leitura() {
         return m ? interpretarMapa(m.texto) : null;
       } };
     });
@@ -5330,6 +5388,7 @@ function AbaHistorico({ app, acoes, abrirConcurso }) {
     acoes.salvarResultado(Number(novo.concurso), novo.data, numerosNovo);
     setNovo({ concurso: "", data: "", numeros: "" });
   }}>Salvar resultado</Botao>
+          {jaExisteOficial && <div style={{ fontSize: 12.5, color: T.alerta, marginTop: 6 }}>Este concurso já existe. Para mudar o resultado, use "Corrigir" na lista abaixo.</div>}
         </div>
       </Card>
 
@@ -5357,15 +5416,38 @@ function AbaHistorico({ app, acoes, abrirConcurso }) {
           </div>}
       </Card>
 
+      {corrigindo && <Card titulo={`Corrigir o concurso ${corrigindo.concurso}`}>
+          <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>A correção fica registrada com motivo e data, o resultado original é preservado, e todo o aprendizado, o placar e o diário são recalculados.</div>
+          <Rotulo>Dezenas corretas ({numerosCorrecao.length}/15)</Rotulo>
+          <input style={{ ...estiloInput, fontFamily: T.mono }} value={corrigindo.numeros} onChange={(e) => setCorrigindo({ ...corrigindo, numeros: e.target.value })} />
+          <div style={{ marginTop: 8 }}><Rotulo>Motivo</Rotulo><input style={estiloInput} value={corrigindo.motivo} placeholder="ex.: conferido no site da Caixa" onChange={(e) => setCorrigindo({ ...corrigindo, motivo: e.target.value })} /></div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <Botao disabled={!validarResultado(numerosCorrecao) || !corrigindo.motivo.trim() || numerosCorrecao.join() === (app.resultados.find((r) => r.concurso === corrigindo.concurso)?.resultado || []).join()} onClick={() => {
+    acoes.corrigirResultado(corrigindo.concurso, numerosCorrecao, corrigindo.motivo.trim());
+    setCorrigindo(null);
+  }}>Aplicar correção</Botao>
+            <Botao variante="discreto" onClick={() => setCorrigindo(null)}>Cancelar</Botao>
+          </div>
+        </Card>}
+      {correcoes.length > 0 && <Card titulo="Correções aplicadas">
+          <Tabela colunas={[
+    { id: "concurso", titulo: "Concurso", mono: true },
+    { id: "de", titulo: "Original → corrigido", render: (l) => <div><div style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted, textDecoration: "line-through" }}>{(l.original || []).join(" ")}</div><div style={{ fontFamily: T.mono, fontSize: 12 }}>{l.resultado.join(" ")}</div></div> },
+    { id: "motivo", titulo: "Motivo", render: (l) => <div>{l.motivo}<div style={{ fontSize: 11, color: T.textMuted }}>{new Date(l.em).toLocaleString("pt-BR")}</div></div> },
+    { id: "x", titulo: "", render: (l) => <Botao pequeno variante="perigo" onClick={() => acoes.removerCorrecao(l.concurso)}>Desfazer</Botao> }
+  ]} linhas={correcoes.map(([c, v]) => ({ __id: c, concurso: Number(c), ...v }))} />
+        </Card>}
+
       <Card titulo="Concursos" acao={<div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
           {[["todos", "Todos"], ["comMapa", "Com mapa"], ["semMapa", "Sem mapa"], ["comErro", "Mapa com erro"]].map(([id, r]) => <Botao key={id} pequeno variante={filtro === id ? "secundario" : "discreto"} onClick={() => setFiltro(id)}>{r}</Botao>)}
         </div>}>
         <Tabela colunas={[
     { id: "concurso", titulo: "Concurso", mono: true },
     { id: "data", titulo: "Data", mono: true },
-    { id: "resultado", titulo: "Resultado", render: (l) => l.resultado ? <Bolinhas numeros={l.resultado} tamanho={21} /> : <Chip tom="ouro">aguardando</Chip> },
+    { id: "resultado", titulo: "Resultado", render: (l) => l.resultado ? <div><Bolinhas numeros={l.resultado} tamanho={21} />{l.corrigido && <div style={{ marginTop: 4 }}><Chip tom="alerta">corrigido</Chip></div>}</div> : <Chip tom="ouro">aguardando</Chip> },
     { id: "mapa", titulo: "Mapa", render: (l) => !l.mapa ? <span style={{ color: T.textMuted }}>—</span> : l.leitura.mapa.completo ? <Chip tom={l.leitura.mapa.avisos.length ? "alerta" : "bom"}>{l.leitura.mapa.avisos.length ? `${l.leitura.mapa.avisos.length} avisos` : "✓"}</Chip> : <Chip tom="ruim">erro</Chip> },
-    { id: "acoes", titulo: "", render: (l) => <div style={{ display: "flex", gap: 5 }}>
+    { id: "acoes", titulo: "", render: (l) => <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {l.resultado && <Botao pequeno variante="discreto" onClick={() => setCorrigindo({ concurso: l.concurso, numeros: l.resultado.join(" "), motivo: "" })}>Corrigir</Botao>}
               <Botao pequeno variante="discreto" onClick={() => abrirConcurso(l.concurso)}>{l.mapa ? "Abrir" : "Colar mapa"}</Botao>
               {l.mapa && <Botao pequeno variante="perigo" onClick={() => {
       if (confirm(`Remover o mapa do concurso ${l.concurso}?`)) acoes.removerMapa(l.concurso);
@@ -5655,12 +5737,257 @@ function AbaLaboratorio({ app, concursos, meta, acoes }) {
 }
 
 // src/ui/AbaPlacar.jsx
+
+// src/estatistica/metricas.js
+var P02 = 0.6;
+var media2 = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN;
+function brier(probs, sorteio) {
+  const s = new Set(sorteio);
+  let b = 0;
+  for (let n = 1; n <= 25; n++) b += (probs[n] - (s.has(n) ? 1 : 0)) ** 2;
+  return b / 25;
+}
+function logloss(probs, sorteio) {
+  const s = new Set(sorteio);
+  let l = 0;
+  for (let n = 1; n <= 25; n++) {
+    const q = Math.min(1 - 1e-9, Math.max(1e-9, probs[n]));
+    l -= s.has(n) ? Math.log(q) : Math.log(1 - q);
+  }
+  return l / 25;
+}
+function auc(probs, sorteio) {
+  const s = new Set(sorteio);
+  let pares = 0, bons = 0;
+  for (let a = 1; a <= 25; a++) if (s.has(a)) {
+    for (let b = 1; b <= 25; b++) if (!s.has(b)) {
+      pares++;
+      bons += probs[a] > probs[b] ? 1 : probs[a] === probs[b] ? 0.5 : 0;
+    }
+  }
+  return bons / pares;
+}
+var BRIER_NULO = P02 * (1 - P02);
+var LOGLOSS_NULO = -(P02 * Math.log(P02) + (1 - P02) * Math.log(1 - P02));
+function calibracao(registros, nFaixas = 8) {
+  const pares = [];
+  for (const r of registros) {
+    const s = new Set(r.sorteio);
+    for (let n = 1; n <= 25; n++) pares.push([r.probs[n], s.has(n) ? 1 : 0]);
+  }
+  const ps = pares.map((p) => p[0]).sort((a2, b2) => a2 - b2);
+  const cortes = Array.from({ length: nFaixas - 1 }, (_, i) => ps[Math.floor((i + 1) / nFaixas * ps.length)]);
+  const faixas = Array.from({ length: nFaixas }, () => ({ n: 0, somaP: 0, somaY: 0 }));
+  for (const [p, y] of pares) {
+    let k = 0;
+    while (k < cortes.length && p > cortes[k]) k++;
+    faixas[k].n++;
+    faixas[k].somaP += p;
+    faixas[k].somaY += y;
+  }
+  const f = faixas.filter((x) => x.n).map((x) => ({ previsto: x.somaP / x.n, observado: x.somaY / x.n, n: x.n }));
+  const total = pares.length;
+  const ece = f.reduce((s, x) => s + x.n / total * Math.abs(x.previsto - x.observado), 0);
+  const mce = Math.max(...f.map((x) => Math.abs(x.previsto - x.observado)));
+  const lp0 = Math.log(P02 / (1 - P02));
+  let a = 0, b = 1;
+  for (let it = 0; it < 25; it++) {
+    let ga = 0, gb = 0, haa = 0, hab = 0, hbb = 0;
+    for (const [p, y] of pares) {
+      const x = Math.log(p / (1 - p)) - lp0;
+      const q = 1 / (1 + Math.exp(-(lp0 + a + b * x)));
+      const w = q * (1 - q);
+      ga += q - y;
+      gb += (q - y) * x;
+      haa += w;
+      hab += w * x;
+      hbb += w * x * x;
+    }
+    const det = haa * hbb - hab * hab;
+    if (Math.abs(det) < 1e-12) break;
+    a -= (hbb * ga - hab * gb) / det;
+    b -= (haa * gb - hab * ga) / det;
+  }
+  const amplitude = ps[Math.floor(ps.length * 0.95)] - ps[Math.floor(ps.length * 0.05)];
+  return { faixas: f, ece, mce, inclinacao: b, intercepto: a, nitidez: amplitude };
+}
+function janelasMoveis(deltas, tamanho) {
+  if (deltas.length < tamanho) return null;
+  const medias = [];
+  let s = deltas.slice(0, tamanho).reduce((a, b) => a + b, 0);
+  medias.push(s / tamanho);
+  for (let i = tamanho; i < deltas.length; i++) {
+    s += deltas[i] - deltas[i - tamanho];
+    medias.push(s / tamanho);
+  }
+  return { tamanho, pior: Math.min(...medias), melhor: Math.max(...medias), taxaPositiva: medias.filter((m) => m > 0).length / medias.length, serie: medias };
+}
+function neweyWest(x) {
+  const n = x.length, m = media2(x);
+  const L = Math.floor(4 * (n / 100) ** (2 / 9));
+  let v = x.reduce((s, y) => s + (y - m) ** 2, 0) / n;
+  for (let l = 1; l <= L; l++) {
+    let c = 0;
+    for (let i = l; i < n; i++) c += (x[i] - m) * (x[i - l] - m);
+    v += 2 * (1 - l / (L + 1)) * (c / n);
+  }
+  return Math.sqrt(Math.max(v, 0) / n);
+}
+function bootstrapBlocos(x, { bloco = 20, reps = 1e3, semente = 5 } = {}) {
+  const n = x.length, r = rng(semente), medias = [];
+  if (n < bloco * 2) return null;
+  for (let k = 0; k < reps; k++) {
+    let s = 0, c = 0;
+    while (c < n) {
+      const ini = Math.floor(r() * (n - bloco + 1));
+      for (let j = 0; j < bloco && c < n; j++, c++) s += x[ini + j];
+    }
+    medias.push(s / n);
+  }
+  medias.sort((a, b) => a - b);
+  return [medias[Math.floor(reps * 0.025)], medias[Math.floor(reps * 0.975)]];
+}
+function phaseShift(jogos, sorteios, { deslocamentos = 200, semente = 13 } = {}) {
+  const n = jogos.length, r = rng(semente);
+  const acertosCom = (off) => {
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      const d = new Set(sorteios[(i + off) % n]);
+      s += jogos[i].filter((x) => d.has(x)).length;
+    }
+    return s / n;
+  };
+  const real = acertosCom(0);
+  const nulos = [];
+  for (let k = 0; k < deslocamentos; k++) nulos.push(acertosCom(1 + Math.floor(r() * (n - 1))));
+  return { real, mediaNula: media2(nulos), p: (nulos.filter((v) => v >= real).length + 1) / (deslocamentos + 1), vitorias: nulos.filter((v) => real > v).length / deslocamentos };
+}
+function drawdownMaximo(deltas) {
+  let acum = 0, pico = 0, dd = 0;
+  for (const d of deltas) {
+    acum += d;
+    pico = Math.max(pico, acum);
+    dd = Math.max(dd, pico - acum);
+  }
+  return { drawdown: dd, final: acum };
+}
+function relatorio(registros, opcoes = {}) {
+  const n = registros.length;
+  if (!n) return null;
+  const temProbs = registros.every((r) => r.probs);
+  const deltas = registros.map((r) => r.acertos - 9);
+  const quartis = [0, 1, 2, 3].map((q) => media2(deltas.slice(Math.floor(q * n / 4), Math.floor((q + 1) * n / 4))));
+  const nw = neweyWest(deltas);
+  const out = {
+    n,
+    acertosMedios: 9 + media2(deltas),
+    delta: media2(deltas),
+    erroPadraoNW: nw,
+    zNW: media2(deltas) / nw,
+    icBootstrap: bootstrapBlocos(deltas, opcoes),
+    taxaDeltaPositivo: deltas.filter((d) => d > 0).length / n,
+    taxaDeltaNaoNegativo: deltas.filter((d) => d >= 0).length / n,
+    melhor: Math.max(...registros.map((r) => r.acertos)),
+    pior: Math.min(...registros.map((r) => r.acertos)),
+    quartis,
+    piorQuartil: Math.min(...quartis),
+    janelas: [20, 50, 100].map((t) => janelasMoveis(deltas, t)).filter(Boolean),
+    ...drawdownMaximo(deltas)
+  };
+  if (temProbs) {
+    const br = media2(registros.map((r) => brier(r.probs, r.sorteio)));
+    const ll = media2(registros.map((r) => logloss(r.probs, r.sorteio)));
+    const aucs = registros.map((r) => auc(r.probs, r.sorteio));
+    Object.assign(out, {
+      brier: br,
+      ganhoBrier: 1 - br / BRIER_NULO,
+      logloss: ll,
+      ganhoLogloss: LOGLOSS_NULO - ll,
+      auc: media2(aucs),
+      aucRecente: media2(aucs.slice(-100)),
+      aucMediana: [...aucs].sort((a, b) => a - b)[Math.floor(n / 2)],
+      calibracao: calibracao(registros)
+    });
+  }
+  if (registros.every((r) => r.jogo)) out.phaseShift = phaseShift(registros.map((r) => r.jogo), registros.map((r) => r.sorteio));
+  return out;
+}
+
+// src/ui/Diagnostico.jsx
+function Calibracao({ cal }) {
+  const [hover, setHover] = useState6(null);
+  const valores = cal.faixas.flatMap((f) => [f.previsto, f.observado]);
+  const min = Math.min(0.5, ...valores) - 0.01, max = Math.max(0.7, ...valores) + 0.01;
+  const W = 260, H = 200, pad = 30;
+  const x = (v) => pad + (v - min) / (max - min) * (W - pad - 8), y = (v) => H - pad - (v - min) / (max - min) * (H - pad - 8);
+  const ticks = [min, (min + max) / 2, max].map((v) => Math.round(v * 100) / 100);
+  return <div style={{ position: "relative", maxWidth: 360 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%" }}>
+        {ticks.map((v) => <g key={v}>
+          <line x1={x(v)} x2={x(v)} y1={8} y2={H - pad} stroke={T.borderSoft} />
+          <line x1={pad} x2={W - 8} y1={y(v)} y2={y(v)} stroke={T.borderSoft} />
+          <text x={x(v)} y={H - pad + 14} fill={T.textMuted} fontSize="9" textAnchor="middle">{pct(v)}</text>
+          <text x={pad - 4} y={y(v) + 3} fill={T.textMuted} fontSize="9" textAnchor="end">{pct(v)}</text>
+        </g>)}
+        <line x1={x(min)} y1={y(min)} x2={x(max)} y2={y(max)} stroke={T.textMuted} strokeDasharray="4 3" />
+        <polyline fill="none" stroke={T.serie1} strokeWidth="2" points={cal.faixas.map((f) => `${x(f.previsto)},${y(f.observado)}`).join(" ")} />
+        {cal.faixas.map((f, i) => <circle key={i} cx={x(f.previsto)} cy={y(f.observado)} r={hover === i ? 6 : 4.5} fill={T.serie1} stroke={T.surface} strokeWidth="2" onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />)}
+        <text x={(W + pad) / 2} y={H - 2} fill={T.textSoft} fontSize="9.5" textAnchor="middle">probabilidade prevista</text>
+      </svg>
+      {hover != null && <div style={{ position: "absolute", top: 0, right: 0, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 7, padding: "4px 8px", fontSize: 11.5, color: T.text }}>
+        previsto {pct(cal.faixas[hover].previsto, 1)} · observado {pct(cal.faixas[hover].observado, 1)} · {cal.faixas[hover].n.toLocaleString("pt-BR")} casos
+      </div>}
+      <div style={{ fontSize: 11.5, color: T.textSoft }}>Linha tracejada = calibração perfeita (o que o motor diz = o que acontece).</div>
+    </div>;
+}
+function Diagnostico({ rel, titulo = "Diagnóstico científico" }) {
+  if (!rel) return null;
+  const sinal = rel.zNW > 2 && rel.phaseShift?.p < 0.05 && (rel.ganhoLogloss == null || rel.ganhoLogloss > 0);
+  return <Card titulo={titulo}>
+      <Aviso tom={sinal ? "bom" : "alerta"}>
+        {sinal ? "Os indicadores concordam: há vantagem estatística sobre o acaso neste replay." : "Os indicadores não mostram vantagem confiável sobre o acaso: z robusto abaixo de 2 e/ou o phase-shift e o AUC em torno do nulo."}
+      </Aviso>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <Metrica rotulo="Δ acertos por concurso" valor={`${rel.delta >= 0 ? "+" : ""}${dec(rel.delta, 3)}`} detalhe={rel.icBootstrap ? `IC95% bootstrap ${dec(rel.icBootstrap[0], 3)} a ${dec(rel.icBootstrap[1], 3)}` : ""} />
+        <Metrica rotulo="z robusto (Newey-West)" valor={dec(rel.zNW, 2)} tom={rel.zNW > 2 ? "bom" : void 0} detalhe="> 2 para ser relevante" />
+        {rel.ganhoBrier != null && <Metrica rotulo="Ganho de Brier" valor={`${dec(rel.ganhoBrier * 100, 3)}%`} tom={sinal ? "bom" : void 0} detalhe="sobre o nulo (0,24)" />}
+        {rel.ganhoLogloss != null && <Metrica rotulo="Ganho de log-loss" valor={dec(rel.ganhoLogloss * 1e3, 3)} detalhe="milinats por dezena" tom={sinal ? "bom" : void 0} />}
+        {rel.auc != null && <Metrica rotulo="AUC (ranqueamento)" valor={dec(rel.auc, 4)} detalhe={`recente ${dec(rel.aucRecente, 4)} · 0,5 = acaso`} />}
+        {rel.phaseShift && <Metrica rotulo="Phase-shift" valor={`p ${dec(rel.phaseShift.p, 3)}`} detalhe={`vence ${pct(rel.phaseShift.vitorias)} dos desalinhados`} tom={rel.phaseShift.p < 0.05 ? "bom" : void 0} />}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+        <div>
+          <Tabela colunas={[
+    { id: "nome", titulo: "Robustez" },
+    { id: "valor", titulo: "", alinhar: "right", mono: true }
+  ]} linhas={[
+    { __id: 1, nome: "Concursos avaliados", valor: rel.n.toLocaleString("pt-BR") },
+    { __id: 2, nome: "Quartis temporais (Δ acertos)", valor: rel.quartis.map((q) => dec(q, 3)).join(" · ") },
+    { __id: 3, nome: "Pior quartil", valor: dec(rel.piorQuartil, 3) },
+    ...rel.janelas.map((j) => ({ __id: `j${j.tamanho}`, nome: `Janela móvel de ${j.tamanho}: pior | melhor`, valor: `${dec(j.pior, 2)} | ${dec(j.melhor, 2)} (${pct(j.taxaPositiva)} positivas)` })),
+    { __id: 4, nome: "Máximo drawdown acumulado", valor: `${dec(rel.drawdown, 0)} acertos` },
+    { __id: 5, nome: "Concursos com Δ > 0 / Δ ≥ 0", valor: `${pct(rel.taxaDeltaPositivo)} / ${pct(rel.taxaDeltaNaoNegativo)}` },
+    { __id: 6, nome: "Melhor / pior resultado", valor: `${rel.melhor} / ${rel.pior}` },
+    ...rel.calibracao ? [
+      { __id: 7, nome: "Calibração ECE / MCE", valor: `${dec(rel.calibracao.ece * 100, 2)}% / ${dec(rel.calibracao.mce * 100, 2)}%` },
+      { __id: 8, nome: "Inclinação / intercepto (ideal 1 / 0)", valor: `${dec(rel.calibracao.inclinacao, 2)} / ${dec(rel.calibracao.intercepto, 3)}` },
+      { __id: 9, nome: "Nitidez (amplitude 5–95%)", valor: pct(rel.calibracao.nitidez, 2) }
+    ] : []
+  ]} />
+        </div>
+        {rel.calibracao && <Calibracao cal={rel.calibracao} />}
+      </div>
+    </Card>;
+}
+
+// src/ui/AbaPlacar.jsx
 function AbaPlacar({ app, concursos, simulacao, calculando }) {
-  const [perm, setPerm] = useState6(null);
-  const [progresso, setProgresso] = useState6(null);
-  const [nPerm, setNPerm] = useState6(50);
+  const [perm, setPerm] = useState7(null);
+  const [progresso, setProgresso] = useState7(null);
+  const [nPerm, setNPerm] = useState7(50);
   const resultadosPorConcurso = useMemo5(() => new Map(app.resultados.map((r) => [r.concurso, r.resultado])), [app.resultados]);
   const diario = useMemo5(() => placarDiario(app.diario, resultadosPorConcurso), [app.diario, resultadosPorConcurso]);
+  const rel = useMemo5(() => simulacao?.porMotor.astral?.registros.length >= 20 ? relatorio(simulacao.porMotor.astral.registros) : null, [simulacao]);
   const rodarPerm = async () => {
     setPerm(null);
     setProgresso([0, nPerm]);
@@ -5723,6 +6050,7 @@ function AbaPlacar({ app, concursos, simulacao, calculando }) {
               </div>}
           </Card>
           {veredito && <Aviso tom={veredito.tom}>{veredito.txt}</Aviso>}
+          <Diagnostico rel={rel} titulo="Diagnóstico científico · Astral" />
           <Card titulo="Distribuição de acertos · Astral">
             <DistribuicaoAcertos acertos={simulacao.porMotor.astral.acertos} />
           </Card>
@@ -5732,14 +6060,17 @@ function AbaPlacar({ app, concursos, simulacao, calculando }) {
           </Card>
         </>}
 
-      <Card titulo="Placar prospectivo (diário)">
-        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Só jogos registrados antes do sorteio. É a prova definitiva.</div>
-        <Tabela vazio="Nenhum jogo registrado ainda. Na aba Concurso, gere a previsão de um sorteio futuro e registre." colunas={[
+      <Card titulo="Arquivo de previsões reais (produção)">
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Só conta a primeira previsão de cada concurso, congelada antes do sorteio. É a prova definitiva: se um motor tiver vantagem real, ela aparece aqui.</div>
+        <Tabela vazio="Nenhum jogo registrado ainda. Nas abas Concurso ou Quântico, gere a previsão de um sorteio futuro e registre." colunas={[
     { id: "motor", titulo: "Motor", render: (l) => MOTORES[l.__id]?.nome || (l.__id === "quantico" ? "Quântico" : l.__id) },
     { id: "jogos", titulo: "Registrados", alinhar: "right", mono: true },
     { id: "apurados", titulo: "Apurados", alinhar: "right", mono: true },
     { id: "media", titulo: "Média", alinhar: "right", mono: true, render: (l) => dec(l.media, 2) },
-    { id: "ult", titulo: "Últimos", render: (l) => l.lista.slice(-6).map((x) => `${x.concurso}: ${x.acertos}`).join(" · ") }
+    { id: "z", titulo: "z", alinhar: "right", mono: true, render: (l) => dec(l.z, 2) },
+    { id: "brier", titulo: "Ganho Brier", alinhar: "right", mono: true, render: (l) => l.ganhoBrier == null ? "—" : `${dec(l.ganhoBrier * 100, 2)}%` },
+    { id: "conf", titulo: "Confiança de produção", render: (l) => <Chip tom={l.confiancaProducao === "vantagem real" ? "bom" : l.confiancaProducao === "amostra pequena" ? "neutro" : "alerta"}>{l.confiancaProducao}</Chip> },
+    { id: "ult", titulo: "Últimos", render: (l) => l.lista.slice(-5).map((x) => `${x.concurso}: ${x.acertos}`).join(" · ") }
   ]} linhas={Object.entries(diario).map(([m, l]) => ({ ...l, __id: m }))} />
       </Card>
     </>;
@@ -5747,8 +6078,8 @@ function AbaPlacar({ app, concursos, simulacao, calculando }) {
 
 // src/ui/AbaBackup.jsx
 function AbaBackup({ app, acoes }) {
-  const [texto, setTexto] = useState7("");
-  const [msg, setMsg] = useState7(null);
+  const [texto, setTexto] = useState8("");
+  const [msg, setMsg] = useState8(null);
   const exportado = JSON.stringify(app);
   const baixar = () => {
     try {
@@ -6054,10 +6385,18 @@ var CARACTERISTICAS = [
   { id: "f100", nome: "Frequência nos últimos 100" },
   { id: "f500", nome: "Frequência nos últimos 500" },
   { id: "fTudo", nome: "Frequência no histórico todo" },
+  { id: "ema", nome: "Média móvel exponencial" },
+  { id: "momentum", nome: "Momentum (EMA curta − EMA longa)" },
   { id: "ultimo", nome: "Saiu no último concurso" },
   { id: "atraso", nome: "Atraso (concursos sem sair)" },
   { id: "sequencia", nome: "Sequência de presenças seguidas" },
-  { id: "pares", nome: "Afinidade de pares com o último sorteio" }
+  { id: "markov1", nome: "Markov ordem 1 (transição da própria dezena)" },
+  { id: "markov2", nome: "Markov ordem 2 (últimos 2 estados)" },
+  { id: "hazard", nome: "Pressão do atraso (hazard empírico)" },
+  { id: "pares", nome: "Afinidade de pares com o último sorteio" },
+  { id: "knn", nome: "Similaridade histórica (KNN)" },
+  { id: "linha", nome: "Nível da linha do volante (últimos 20)" },
+  { id: "coluna", nome: "Nível da coluna do volante (últimos 20)" }
 ];
 var IDX = Object.fromEntries(CARACTERISTICAS.map((c, i) => [c.id, i]));
 var K = CARACTERISTICAS.length;
@@ -6065,21 +6404,43 @@ var FAMILIAS = [
   { id: "nulo", nome: "Nulo (acaso puro, 60%)", usa: [] },
   { id: "freqLonga", nome: "Frequência de longo prazo", usa: ["f500", "fTudo"] },
   { id: "freqCurta", nome: 'Frequência recente ("quentes")', usa: ["f10", "f30", "f100"] },
+  { id: "tendencia", nome: "Tendência (EMA, momentum)", usa: ["ema", "momentum"] },
   { id: "memoria", nome: "Memória (último, atraso, sequência)", usa: ["ultimo", "atraso", "sequencia"] },
+  { id: "markov", nome: "Markov e hazard", usa: ["markov1", "markov2", "hazard"] },
   { id: "pares", nome: "Pares", usa: ["pares"] },
+  { id: "similaridade", nome: "Similaridade histórica (KNN)", usa: ["knn"] },
+  { id: "volante", nome: "Estrutura do volante (linha, coluna)", usa: ["linha", "coluna"] },
   { id: "todos", nome: "Todas as características", usa: CARACTERISTICAS.map((c) => c.id) }
 ];
+var FAMILIAS_SINAL = FAMILIAS.filter((f) => f.usa.length).map((f) => f.id);
 var TAXAS = [3e-3, 0.02];
 var ESQUECIMENTO = 0.998;
-function criarEstado2() {
+var JANELA_KNN = 1500;
+var VIZINHOS_KNN = 40;
+var MAX_GAP = 12;
+var popcount = (x) => {
+  x -= x >>> 1 & 1431655765;
+  x = (x & 858993459) + (x >>> 2 & 858993459);
+  return (x + (x >>> 4) & 252645135) * 16843009 >>> 24;
+};
+function criarEstado2(familiasAtivas = null) {
+  const ativa = (f) => !f.usa.length || !familiasAtivas || familiasAtivas.has(f.id);
   return {
     t: 0,
     historico: [],
+    mascaras: [],
     cont: new Float64Array(26),
     ultimoVisto: new Int32Array(26).fill(-1),
     seq: new Int32Array(26),
     cooc: Array.from({ length: 26 }, () => new Float64Array(26)),
-    modelos: FAMILIAS.flatMap((f) => f.usa.length ? TAXAS.map((lr) => ({ familia: f.id, lr, usa: f.usa.map((u) => IDX[u]), w: new Float64Array(K + 1), g2: new Float64Array(K + 1).fill(1e-8), perda: 0, perdaTotal: 0 })) : [{ familia: f.id, nulo: true, perda: 0, perdaTotal: 0 }])
+    emaLenta: new Float64Array(26).fill(0.6),
+    emaMedia: new Float64Array(26).fill(0.6),
+    emaRapida: new Float64Array(26).fill(0.6),
+    // Markov por dezena: trans1[n][estadoAnterior] = [vezes, saiu]; trans2 com 4 estados.
+    trans1: Array.from({ length: 26 }, () => [[0, 0], [0, 0]]),
+    trans2: Array.from({ length: 26 }, () => [[0, 0], [0, 0], [0, 0], [0, 0]]),
+    hazard: Array.from({ length: MAX_GAP + 1 }, () => [0, 0]),
+    modelos: FAMILIAS.filter(ativa).flatMap((f) => f.usa.length ? TAXAS.map((lr) => ({ familia: f.id, lr, usa: f.usa.map((u) => IDX[u]), w: new Float64Array(K + 1), g2: new Float64Array(K + 1).fill(1e-8), perda: 0, perdaTotal: 0 })) : [{ familia: f.id, nulo: true, perda: 0, perdaTotal: 0 }])
   };
 }
 function freqJanela(estado, n, janela) {
@@ -6089,21 +6450,41 @@ function freqJanela(estado, n, janela) {
   for (let i = ini; i < h.length; i++) if (h[i].has(n)) c++;
   return c / (h.length - ini) - 0.6;
 }
+var taxaSuavizada = ([vezes, saiu], forca = 20) => (saiu + forca * 0.6) / (vezes + forca) - 0.6;
+var gapDe = (estado, n) => estado.ultimoVisto[n] < 0 ? MAX_GAP : Math.min(MAX_GAP, estado.t - 1 - estado.ultimoVisto[n]);
 function caracteristicas(estado) {
   const X = Array.from({ length: 26 }, () => new Float64Array(K));
-  const h = estado.historico, ultimo = h[h.length - 1];
+  const h = estado.historico, t = estado.t, ultimo = h[t - 1], penultimo = h[t - 2];
+  const knn = new Float64Array(26);
+  if (t > 60) {
+    const alvo = estado.mascaras[t - 1], cand = [];
+    for (let i = Math.max(0, t - 1 - JANELA_KNN); i < t - 1; i++) cand.push([popcount(estado.mascaras[i] & alvo), i]);
+    cand.sort((a, b) => b[0] - a[0]);
+    const viz = cand.slice(0, VIZINHOS_KNN);
+    for (const [, i] of viz) for (const n of h[i + 1]) knn[n]++;
+    for (let n = 1; n <= 25; n++) knn[n] = knn[n] / viz.length - 0.6;
+  }
+  const linhaC = new Float64Array(5), colC = new Float64Array(5), j20 = Math.min(20, t);
+  for (let i = t - j20; i < t; i++) for (const n of h[i]) {
+    linhaC[Math.floor((n - 1) / 5)]++;
+    colC[(n - 1) % 5]++;
+  }
   for (let n = 1; n <= 25; n++) {
     const x = X[n];
     x[IDX.f10] = freqJanela(estado, n, 10) * 3;
     x[IDX.f30] = freqJanela(estado, n, 30) * 5;
     x[IDX.f100] = freqJanela(estado, n, 100) * 8;
     x[IDX.f500] = freqJanela(estado, n, 500) * 15;
-    x[IDX.fTudo] = estado.t ? (estado.cont[n] / estado.t - 0.6) * 25 : 0;
+    x[IDX.fTudo] = t ? (estado.cont[n] / t - 0.6) * 25 : 0;
+    x[IDX.ema] = (estado.emaMedia[n] - 0.6) * 5;
+    x[IDX.momentum] = (estado.emaRapida[n] - estado.emaLenta[n]) * 4;
     x[IDX.ultimo] = ultimo ? ultimo.has(n) ? 0.4 : -0.6 : 0;
-    const atraso = estado.ultimoVisto[n] < 0 ? 0 : estado.t - 1 - estado.ultimoVisto[n];
-    x[IDX.atraso] = Math.log1p(atraso) - 0.4;
+    x[IDX.atraso] = Math.log1p(estado.ultimoVisto[n] < 0 ? 0 : t - 1 - estado.ultimoVisto[n]) - 0.4;
     x[IDX.sequencia] = Math.min(estado.seq[n], 10) / 3 - 0.8;
-    if (ultimo && estado.t > 20) {
+    if (ultimo) x[IDX.markov1] = taxaSuavizada(estado.trans1[n][ultimo.has(n) ? 1 : 0]) * 10;
+    if (penultimo) x[IDX.markov2] = taxaSuavizada(estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)]) * 10;
+    if (t > 20) x[IDX.hazard] = taxaSuavizada(estado.hazard[gapDe(estado, n)], 50) * 10;
+    if (ultimo && t > 20) {
       let s = 0, m = 0;
       for (const j of ultimo) {
         if (j === n || !estado.cont[j]) continue;
@@ -6111,6 +6492,11 @@ function caracteristicas(estado) {
         m++;
       }
       x[IDX.pares] = m ? s / m * 20 : 0;
+    }
+    x[IDX.knn] = knn[n] * 6;
+    if (j20) {
+      x[IDX.linha] = (linhaC[Math.floor((n - 1) / 5)] / (j20 * 5) - 0.6) * 8;
+      x[IDX.coluna] = (colC[(n - 1) % 5] / (j20 * 5) - 0.6) * 8;
     }
   }
   return X;
@@ -6133,31 +6519,64 @@ function perdaLog2(p, sorteado) {
   }
   return s;
 }
-function pesosMistura2(estado) {
-  const M = estado.modelos.length;
-  const prior = estado.modelos.map((m) => m.nulo ? 0.5 : 0.5 / (M - 1));
-  const min = Math.min(...estado.modelos.map((m) => m.perda));
-  const w = estado.modelos.map((m, i) => prior[i] * Math.exp(-(m.perda - min)));
+function pesosMistura2(estado, excluir = null) {
+  const ativos = estado.modelos.map((m) => m.familia !== excluir);
+  const M = ativos.filter(Boolean).length;
+  const min = Math.min(...estado.modelos.filter((_, i) => ativos[i]).map((m) => m.perda));
+  const w = estado.modelos.map((m, i) => ativos[i] ? (m.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)) * Math.exp(-(m.perda - min)) : 0);
   const soma = w.reduce((a, b) => a + b, 0);
   return w.map((x) => x / soma);
 }
-function pesosPorFamilia(estado) {
-  const w = pesosMistura2(estado), porFamilia = {};
+function pesosPorFamilia(estado, excluir = null) {
+  const w = pesosMistura2(estado, excluir), porFamilia = {};
   estado.modelos.forEach((m, i) => {
     porFamilia[m.familia] = (porFamilia[m.familia] || 0) + w[i];
   });
   return porFamilia;
 }
-function prever2(estado, X = caracteristicas(estado)) {
-  const pesos = pesosMistura2(estado);
+function prever2(estado, X = caracteristicas(estado), { excluir = null } = {}) {
+  const pesos = pesosMistura2(estado, excluir);
   const p = new Array(26).fill(0);
+  const porFamilia = {};
   estado.modelos.forEach((m, i) => {
-    if (pesos[i] < 1e-6) return;
+    if (pesos[i] < 1e-7) return;
     const pm = probsModelo(m, X);
-    for (let n = 1; n <= 25; n++) p[n] += pesos[i] * pm[n];
+    const f = porFamilia[m.familia] ||= { peso: 0, p: new Array(26).fill(0) };
+    f.peso += pesos[i];
+    for (let n = 1; n <= 25; n++) {
+      p[n] += pesos[i] * pm[n];
+      f.p[n] += pesos[i] * pm[n];
+    }
   });
-  const confianca = 1 - (pesosPorFamilia(estado).nulo || 0);
-  return { probs: p, jogo: top15(p), confianca, familias: pesosPorFamilia(estado) };
+  const familias = pesosPorFamilia(estado, excluir);
+  return { probs: p, jogo: top15(p), confianca: 1 - (familias.nulo || 0), familias, porFamilia };
+}
+function explicarDezena(previsao, n) {
+  return Object.entries(previsao.porFamilia).map(([familia, f]) => ({ familia, peso: f.peso, contribuicao: f.p[n] - f.peso * 0.6 })).sort((a, b) => Math.abs(b.contribuicao) - Math.abs(a.contribuicao));
+}
+function contrafactual(estado, X = caracteristicas(estado)) {
+  const base = prever2(estado, X);
+  return FAMILIAS_SINAL.filter((f) => estado.modelos.some((m) => m.familia === f)).map((f) => {
+    const sem = prever2(estado, X, { excluir: f });
+    const deltas = Array.from({ length: 26 }, (_, n) => n ? base.probs[n] - sem.probs[n] : 0);
+    const trocas = base.jogo.filter((n) => !sem.jogo.includes(n)).length;
+    return { familia: f, deltas, trocasNoJogo: trocas, maiorDelta: Math.max(...deltas.map(Math.abs)) };
+  });
+}
+function governanca(estado) {
+  const nulo = estado.modelos.find((m) => m.nulo);
+  const linhas = FAMILIAS_SINAL.map((f) => {
+    const ms = estado.modelos.filter((m) => m.familia === f);
+    if (!ms.length) return { familia: f, status: "Desativada" };
+    const melhor = ms.reduce((a, b) => b.perda < a.perda ? b : a);
+    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map((m) => m.perdaTotal)) };
+  });
+  const ativas = linhas.filter((l) => l.status !== "Desativada");
+  const campea = ativas.reduce((a, b) => b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a, null);
+  for (const l of ativas) {
+    l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.vantagemRecente > -2 ? "Watch" : "Quarantine";
+  }
+  return linhas;
 }
 function registrar2(estado, dezenas, X = caracteristicas(estado)) {
   const sorteado = new Set(dezenas);
@@ -6177,49 +6596,89 @@ function registrar2(estado, dezenas, X = caracteristicas(estado)) {
       m.w[k] -= m.lr / Math.sqrt(m.g2[k]) * g[k] * Math.sqrt(estado.t + 1) * 0.05;
     }
   }
+  const t = estado.t, ultimo = estado.historico[t - 1], penultimo = estado.historico[t - 2];
+  for (let n = 1; n <= 25; n++) {
+    const y = sorteado.has(n) ? 1 : 0;
+    if (ultimo) {
+      const tr = estado.trans1[n][ultimo.has(n) ? 1 : 0];
+      tr[0]++;
+      tr[1] += y;
+    }
+    if (penultimo) {
+      const tr = estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)];
+      tr[0]++;
+      tr[1] += y;
+    }
+    if (t > 0) {
+      const hz = estado.hazard[gapDe(estado, n)];
+      hz[0]++;
+      hz[1] += y;
+    }
+    estado.emaLenta[n] += 0.05 * (y - estado.emaLenta[n]);
+    estado.emaMedia[n] += 0.1 * (y - estado.emaMedia[n]);
+    estado.emaRapida[n] += 0.2 * (y - estado.emaRapida[n]);
+  }
   for (const n of dezenas) {
     estado.cont[n]++;
-    estado.seq[n] = estado.ultimoVisto[n] === estado.t - 1 ? estado.seq[n] + 1 : 1;
-    estado.ultimoVisto[n] = estado.t;
+    estado.seq[n] = estado.ultimoVisto[n] === t - 1 ? estado.seq[n] + 1 : 1;
+    estado.ultimoVisto[n] = t;
     for (const j of dezenas) if (j !== n) estado.cooc[n][j]++;
   }
   for (let n = 1; n <= 25; n++) if (!sorteado.has(n)) estado.seq[n] = 0;
   estado.historico.push(sorteado);
+  estado.mascaras.push(dezenas.reduce((m, n) => m | 1 << n - 1, 0));
   estado.t++;
 }
 function simular2(sorteios, opcoes = {}) {
-  const { aquecimento = 200, concursos = null } = opcoes;
-  const estado = criarEstado2();
-  const acertos2 = [], confiancas = [], pontos = [];
+  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true } = opcoes;
+  const estado = criarEstado2(familiasAtivas);
+  const acertos2 = [], pontos = [], registros = [];
   let perdaMistura = 0, perdaNula = 0, n = 0;
   sorteios.forEach((dezenas, i) => {
     const X = caracteristicas(estado);
     if (i >= aquecimento) {
       const prev = prever2(estado, X);
       const s = new Set(dezenas);
-      acertos2.push(prev.jogo.filter((x) => s.has(x)).length);
+      const a = prev.jogo.filter((x) => s.has(x)).length;
+      acertos2.push(a);
       perdaMistura += perdaLog2(prev.probs, s);
       perdaNula += perdaLog2(new Array(26).fill(0.6), s);
       n++;
-      confiancas.push(prev.confianca);
+      if (guardarRegistros) registros.push({ concurso: concursos ? concursos[i] : i + 1, probs: prev.probs, sorteio: dezenas, jogo: prev.jogo, acertos: a });
       if (i % 20 === 0) pontos.push({ rotulo: concursos ? concursos[i] : i + 1, valor: prev.confianca, familias: prev.familias });
     }
     registrar2(estado, dezenas, X);
   });
-  return { acertos: acertos2, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, estado };
+  return { acertos: acertos2, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
 }
 async function testeTemporal(sorteios, opcoes = {}) {
   const { n = 30, semente = 7, onProgresso, aquecimento } = opcoes;
-  const real = simular2(sorteios, { aquecimento });
+  const real = simular2(sorteios, { aquecimento, guardarRegistros: false });
   const r = rng(semente), nulos = [];
   for (let i = 0; i < n; i++) {
-    nulos.push(simular2(embaralhar(sorteios, r), { aquecimento }).ganho);
+    nulos.push(simular2(embaralhar(sorteios, r), { aquecimento, guardarRegistros: false }).ganho);
     if (onProgresso) {
       onProgresso(i + 1, n);
       await new Promise((res) => setTimeout(res, 0));
     }
   }
   return { ganhoReal: real.ganho, nulos, p: (nulos.filter((g) => g >= real.ganho).length + 1) / (n + 1) };
+}
+async function scannerAblacao(sorteios, opcoes = {}) {
+  const { onProgresso, aquecimento = 200 } = opcoes;
+  const resumo = (r) => ({ ganho: r.ganho, acertos: r.acertos.reduce((a, b) => a + b, 0) / r.n, recentes: r.acertos.slice(-500).reduce((a, b) => a + b, 0) / Math.min(500, r.n) });
+  const base = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false }));
+  const linhas = [];
+  for (let i = 0; i < FAMILIAS_SINAL.length; i++) {
+    const f = FAMILIAS_SINAL[i];
+    const sem = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false, familiasAtivas: new Set(FAMILIAS_SINAL.filter((x) => x !== f)) }));
+    linhas.push({ familia: f, ...sem, deltaGanho: base.ganho - sem.ganho, deltaAcertos: base.acertos - sem.acertos, deltaRecentes: base.recentes - sem.recentes });
+    if (onProgresso) {
+      onProgresso(i + 1, FAMILIAS_SINAL.length);
+      await new Promise((res) => setTimeout(res, 0));
+    }
+  }
+  return { base, linhas: linhas.sort((a, b) => b.deltaGanho - a.deltaGanho) };
 }
 
 // src/quantico/popularidade.js
@@ -6366,7 +6825,7 @@ function premioEsperado(modelo, indice) {
 }
 
 // src/quantico/otimizador.js
-var popcount = (x) => {
+var popcount2 = (x) => {
   x -= x >>> 1 & 1431655765;
   x = (x & 858993459) + (x >>> 2 & 858993459);
   return (x + (x >>> 4) & 252645135) * 16843009 >>> 24;
@@ -6413,7 +6872,7 @@ function gerarJogos(opcoes) {
     if (pesoMotor) for (const n of jogo) e -= pesoMotor * Math.log(probs[n] / 0.6) * 3;
     return e;
   };
-  const penalSobreposicao = (a, b) => Math.max(0, popcount(a & b) - sobreposicaoMax);
+  const penalSobreposicao = (a, b) => Math.max(0, popcount2(a & b) - sobreposicaoMax);
   let jogos = Array.from({ length: quantidade }, novoJogo);
   let mascaras = jogos.map(mascara);
   let ej = jogos.map(energiaJogo);
@@ -6460,7 +6919,7 @@ function simularConjunto(jogos, { sorteios = 5e4, semente = 3 } = {}) {
     for (let i = 0; i < 15; i++) d |= 1 << base[i];
     let top = 0, premiados = 0;
     for (const m of ms) {
-      const k = popcount(m & d);
+      const k = popcount2(m & d);
       if (k > top) top = k;
       if (k >= 11) premiados++;
     }
@@ -6497,14 +6956,14 @@ async function fechamento(grupo, garantia, { semente = 11, amostraCandidatos = n
     let melhorC = null, melhorGanho = -1;
     for (const c of cand) {
       let ganho = 0;
-      for (let i = 0; i < subs.length; i++) if (!coberto[i] && popcount(c & subs[i]) >= garantia) ganho++;
+      for (let i = 0; i < subs.length; i++) if (!coberto[i] && popcount2(c & subs[i]) >= garantia) ganho++;
       if (ganho > melhorGanho) {
         melhorGanho = ganho;
         melhorC = c;
       }
     }
     escolhidos.push(melhorC);
-    for (let i = 0; i < subs.length; i++) if (!coberto[i] && popcount(melhorC & subs[i]) >= garantia) {
+    for (let i = 0; i < subs.length; i++) if (!coberto[i] && popcount2(melhorC & subs[i]) >= garantia) {
       coberto[i] = 1;
       restantes--;
     }
@@ -6516,7 +6975,7 @@ async function fechamento(grupo, garantia, { semente = 11, amostraCandidatos = n
   const cobertura = new Int32Array(subs.length);
   const cobre = escolhidos.map((c) => {
     const l = [];
-    for (let i = 0; i < subs.length; i++) if (popcount(c & subs[i]) >= garantia) {
+    for (let i = 0; i < subs.length; i++) if (popcount2(c & subs[i]) >= garantia) {
       l.push(i);
       cobertura[i]++;
     }
@@ -6529,7 +6988,7 @@ async function fechamento(grupo, garantia, { semente = 11, amostraCandidatos = n
       cobre.splice(i, 1);
     }
   }
-  const verificado = subs.every((s) => escolhidos.some((c) => popcount(c & s) >= garantia));
+  const verificado = subs.every((s) => escolhidos.some((c) => popcount2(c & s) >= garantia));
   return {
     jogos: escolhidos.map(deMascara),
     cenarios: subs.length,
@@ -6590,42 +7049,155 @@ function Laudo({ sorteios }) {
       </Card>
     </>;
 }
+var STATUS_TOM = { Champion: "bom", Challenger: "ouro", Watch: "neutro", Quarantine: "ruim", Desativada: "neutro" };
+var nomeFamilia = (id) => FAMILIAS.find((f) => f.id === id)?.nome || id;
+function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
+  const familias = Object.keys(previsao.porFamilia).filter((f) => f !== "nulo");
+  const contrib = (f, n) => previsao.porFamilia[f].p[n] - previsao.porFamilia[f].peso * 0.6;
+  const max = Math.max(1e-6, ...familias.flatMap((f) => Array.from({ length: 25 }, (_, i) => Math.abs(contrib(f, i + 1)))));
+  return <div style={{ overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `minmax(120px, 170px) repeat(25, minmax(18px, 1fr))`, gap: 2, fontSize: 11, minWidth: 560 }}>
+        <div />
+        {Array.from({ length: 25 }, (_, i) => <div key={i} onClick={() => onSelecionar(i + 1)} style={{ textAlign: "center", fontFamily: T.mono, cursor: "pointer", color: selecionada === i + 1 ? T.goldText : T.textMuted, fontWeight: selecionada === i + 1 ? 700 : 400 }}>{formatarNum(i + 1)}</div>)}
+        {familias.map((f) => [
+    <div key={f} style={{ color: T.textSoft, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 4 }} title={nomeFamilia(f)}>{nomeFamilia(f)}</div>,
+    ...Array.from({ length: 25 }, (_, i) => {
+      const v = contrib(f, i + 1), a = Math.min(1, Math.abs(v) / max);
+      return <div
+        key={`${f}${i}`}
+        onClick={() => onSelecionar(i + 1)}
+        title={`${nomeFamilia(f)} · nº ${formatarNum(i + 1)}: ${v >= 0 ? "+" : ""}${dec(v * 100, 3)} pontos %`}
+        style={{ height: 18, borderRadius: 3, cursor: "pointer", background: v >= 0 ? T.serie2 : T.serie1, opacity: 0.12 + a * 0.88, outline: selecionada === i + 1 ? `1px solid ${T.gold}` : "none" }}
+      />;
+    })
+  ])}
+      </div>
+      <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11.5, color: T.textSoft, flexWrap: "wrap" }}>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie2, borderRadius: 2, marginRight: 5 }} />empurra a dezena para cima</span>
+        <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie1, borderRadius: 2, marginRight: 5 }} />empurra para baixo</span>
+        <span>intensidade = tamanho do efeito (escala relativa ±{dec(max * 100, 3)} pontos %)</span>
+      </div>
+    </div>;
+}
 function Previsao({ sorteios, concursos, proximo, acoes }) {
-  const [res, setRes] = useState8(null);
-  const [perm, setPerm] = useState8(null);
-  const [prog, setProg] = useState8(null);
-  const [registrado, setRegistrado] = useState8(false);
+  const [ativas, setAtivas] = useState9(() => new Set(FAMILIAS_SINAL));
+  const [base, setBase] = useState9(null);
+  const [config, setConfig] = useState9(null);
+  const [calculando, setCalculando] = useState9(false);
+  const [perm, setPerm] = useState9(null);
+  const [scan, setScan] = useState9(null);
+  const [prog, setProg] = useState9(null);
+  const [dezena, setDezena] = useState9(null);
+  const [registrado, setRegistrado] = useState9(false);
   useEffect2(() => {
-    const t = setTimeout(() => setRes(simular2(sorteios, { concursos })), 50);
+    setBase(null);
+    setConfig(null);
+    const t = setTimeout(() => setBase(simular2(sorteios, { concursos })), 50);
     return () => clearTimeout(t);
   }, [sorteios]);
-  if (!res) return <Card><div style={{ color: T.textSoft }}>Treinando o motor em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
-  const prox = prever2(res.estado);
+  const atual = config || base;
+  const rel = useMemo6(() => atual ? relatorio(atual.registros) : null, [atual]);
+  if (!atual) return <Card><div style={{ color: T.textSoft }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
+  const prox = prever2(atual.estado);
+  const gov = governanca(atual.estado);
+  const cf = dezena ? contrafactual(atual.estado) : null;
   const blocos = [];
-  for (let i = 0; i < res.acertos.length; i += 500) {
-    const xs = res.acertos.slice(i, i + 500), m = media(xs);
+  for (let i = 0; i < atual.acertos.length; i += 500) {
+    const xs = atual.acertos.slice(i, i + 500), m = media(xs);
     blocos.push({ __id: i, de: concursos[200 + i], ate: concursos[Math.min(200 + i + 499, concursos.length - 1)], media: m, z: (m - 9) / (0.949 / Math.sqrt(xs.length)) });
   }
+  const aplicar = () => {
+    setCalculando(true);
+    setTimeout(() => {
+      setConfig(ativas.size === FAMILIAS_SINAL.length ? null : simular2(sorteios, { concursos, familiasAtivas: ativas }));
+      setCalculando(false);
+    }, 30);
+  };
   const rodarPerm = async (n) => {
     setPerm(null);
-    setProg([0, n]);
-    const r = await testeTemporal(sorteios, { n, onProgresso: (i, t) => setProg([i, t]) });
+    setProg(["perm", 0, n]);
+    const r = await testeTemporal(sorteios, { n, onProgresso: (i, t) => setProg(["perm", i, t]) });
     setPerm(r);
     setProg(null);
   };
+  const rodarScan = async () => {
+    setScan(null);
+    setProg(["scan", 0, FAMILIAS_SINAL.length]);
+    const r = await scannerAblacao(sorteios, { onProgresso: (i, t) => setProg(["scan", i, t]) });
+    setScan(r);
+    setProg(null);
+  };
+  const proxBase = config ? prever2(base.estado) : null;
   return <>
-      <Card titulo="Motor preditivo">
+      <Card titulo="Motor preditivo" acao={config ? <Chip tom="alerta">configuração de teste ativa</Chip> : null}>
         <div style={{ fontSize: 13, color: T.textSoft, lineHeight: 1.55, marginBottom: 12 }}>
-          Seis famílias de modelos competem numa mistura bayesiana: frequência de longo prazo, números "quentes", memória (último, atraso, sequência),
-          pares e todas juntas, contra o <b style={{ color: T.goldText }}>modelo nulo</b> (acaso puro). Cada concurso é previsto só com o passado. O desempenho antigo
-          vai sendo esquecido (meia-vida ≈ 350 concursos), então um viés que já sumiu deixa de ser seguido.
+          {FAMILIAS_SINAL.length} famílias de sinais (frequência, tendência, memória, Markov, pares, similaridade KNN, estrutura do volante e todas juntas) competem numa
+          mistura bayesiana contra o <b style={{ color: T.goldText }}>modelo nulo</b>. Replay <i>test-then-learn</i>: cada concurso é previsto só com o passado e depois entra
+          no aprendizado. O desempenho antigo é esquecido aos poucos (meia-vida ≈ 350 concursos).
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Metrica rotulo="Confiança em padrões hoje" valor={pct(prox.confianca)} detalhe="50% = não sei; perto de 100% = padrão forte" tom={prox.confianca > 0.9 ? "bom" : void 0} />
-          <Metrica rotulo="Acertos médios (todo o histórico)" valor={dec(media(res.acertos), 3)} detalhe={`${res.acertos.length.toLocaleString("pt-BR")} concursos · acaso = 9,000`} />
-          <Metrica rotulo="Acertos médios (últimos 500)" valor={dec(media(res.acertos.slice(-500)), 3)} detalhe="o que vale para hoje" />
+          <Metrica rotulo="Acertos médios (todo o replay)" valor={dec(media(atual.acertos), 3)} detalhe={`${atual.acertos.length.toLocaleString("pt-BR")} concursos · acaso = 9,000`} />
+          <Metrica rotulo="Acertos médios (últimos 500)" valor={dec(media(atual.acertos.slice(-500)), 3)} detalhe="o que vale para hoje" />
         </div>
       </Card>
+
+      <Card titulo="Centro de controle">
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Desligue famílias e recalcule para comparar com o motor completo. O teste não altera nada salvo.</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {FAMILIAS_SINAL.map((f) => <label key={f} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, padding: "5px 9px", cursor: "pointer" }}>
+              <input type="checkbox" checked={ativas.has(f)} onChange={(e) => {
+    const n = new Set(ativas);
+    e.target.checked ? n.add(f) : n.delete(f);
+    setAtivas(n);
+  }} />
+              {nomeFamilia(f)}
+            </label>)}
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <Botao onClick={aplicar} disabled={calculando}>{calculando ? "Recalculando…" : "Aplicar e recalcular"}</Botao>
+          <Botao variante="discreto" onClick={() => {
+    setAtivas(new Set(FAMILIAS_SINAL));
+    setConfig(null);
+  }}>Reativar todas</Botao>
+        </div>
+        {config && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+            <Metrica rotulo="Δ acertos médios (config − completo)" valor={dec(media(config.acertos) - media(base.acertos), 4)} />
+            <Metrica rotulo="Δ ganho de informação" valor={dec((config.ganho - base.ganho) * 1e3, 3)} detalhe="milinats por concurso" />
+            <Metrica rotulo="Dezenas iguais no próximo jogo" valor={`${prox.jogo.filter((n) => proxBase.jogo.includes(n)).length}/15`} />
+          </div>}
+      </Card>
+
+      <Card titulo="Governança das famílias">
+        <Tabela colunas={[
+    { id: "familia", titulo: "Família", render: (l) => nomeFamilia(l.familia) },
+    { id: "status", titulo: "Status", render: (l) => <Chip tom={STATUS_TOM[l.status]}>{l.status}</Chip> },
+    { id: "rec", titulo: "Vantagem recente", alinhar: "right", mono: true, render: (l) => l.vantagemRecente == null ? "—" : `${l.vantagemRecente >= 0 ? "+" : ""}${dec(l.vantagemRecente, 1)} nats` },
+    { id: "tot", titulo: "Vantagem acumulada", alinhar: "right", mono: true, render: (l) => l.vantagemTotal == null ? "—" : `${l.vantagemTotal >= 0 ? "+" : ""}${dec(l.vantagemTotal, 1)} nats` },
+    { id: "peso", titulo: "Peso hoje", alinhar: "right", mono: true, render: (l) => pct(prox.familias[l.familia] || 0, 1) }
+  ]} linhas={gov.map((g) => ({ ...g, __id: g.familia }))} />
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: pior que o acaso.</div>
+      </Card>
+
+      <Diagnostico rel={rel} titulo="Diagnóstico científico · Quântico" />
+
+      <Card titulo="Mapa de evidências por dezena">
+        <MapaEvidencias previsao={prox} selecionada={dezena} onSelecionar={setDezena} />
+        {dezena && <div style={{ marginTop: 14 }}>
+            <Rotulo>Nº {formatarNum(dezena)} · probabilidade {pct(prox.probs[dezena], 2)}</Rotulo>
+            <Tabela colunas={[
+    { id: "familia", titulo: "Família", render: (l) => nomeFamilia(l.familia) },
+    { id: "peso", titulo: "Peso", alinhar: "right", mono: true, render: (l) => pct(l.peso, 1) },
+    { id: "contrib", titulo: "Contribuição", alinhar: "right", mono: true, render: (l) => <span style={{ color: l.contribuicao > 0 ? T.bom : l.contribuicao < 0 ? T.ruim : T.text }}>{l.contribuicao >= 0 ? "+" : ""}{dec(l.contribuicao * 100, 4)} p.p.</span> },
+    { id: "cf", titulo: "Sem esta família", alinhar: "right", mono: true, render: (l) => {
+      const c = cf.find((x) => x.familia === l.familia);
+      return c ? pct(prox.probs[dezena] - c.deltas[dezena], 2) : "—";
+    } }
+  ]} linhas={explicarDezena(prox, dezena).filter((l) => l.familia !== "nulo").map((l) => ({ ...l, __id: l.familia }))} />
+            <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>"Sem esta família" é o contrafactual leave-one-family-out: a probabilidade se a família fosse ignorada hoje.</div>
+          </div>}
+      </Card>
+
       <Card titulo="Desempenho por época">
         <Tabela colunas={[
     { id: "faixa", titulo: "Concursos", mono: true, render: (l) => `${l.de}–${l.ate}` },
@@ -6633,39 +7205,50 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
     { id: "z", titulo: "z vs acaso", alinhar: "right", mono: true, render: (l) => <span style={{ color: l.z > 2 ? T.bom : T.text }}>{dec(l.z, 2)}</span> }
   ]} linhas={blocos} />
       </Card>
-      <Card titulo="Peso de cada família hoje">
-        <Tabela colunas={[
-    { id: "nome", titulo: "Família" },
-    { id: "peso", titulo: "Peso na mistura", alinhar: "right", mono: true, render: (l) => pct(l.peso, 1) },
-    { id: "barra", titulo: "", render: (l) => <div style={{ width: 140, height: 8, background: T.surface2, borderRadius: 4 }}><div style={{ width: `${l.peso * 100}%`, height: "100%", background: l.id === "nulo" ? T.textMuted : T.serie1, borderRadius: 4 }} /></div> }
-  ]} linhas={FAMILIAS.map((f) => ({ __id: f.id, id: f.id, nome: f.nome, peso: prox.familias[f.id] || 0 }))} />
-      </Card>
       <Card titulo="Confiança em padrões ao longo do histórico">
-        <LinhaTempo rotuloY="confiança" pontos={res.pontos} />
+        <LinhaTempo rotuloY="confiança" pontos={atual.pontos} />
       </Card>
-      <Card titulo={`Próximo concurso (${proximo})`}>
-        <BarrasProbabilidade probs={prox.probs} jogo={prox.jogo} />
+
+      <Card titulo={`Próximo concurso (${proximo.concurso}${proximo.data ? ` · ${proximo.data} estimada` : ""})`}>
+        <BarrasProbabilidade probs={prox.probs} jogo={prox.jogo} onSelecionar={setDezena} selecionado={dezena} />
         <div style={{ marginTop: 12 }}><Bolinhas numeros={prox.jogo} /></div>
         {prox.confianca < 0.9 && <Aviso tom="info">Com confiança abaixo de 90%, estas diferenças de probabilidade são ruído: qualquer jogo tem a mesma chance. Use o Gerador para ganhar no rateio.</Aviso>}
         <div style={{ marginTop: 10 }}>
-          <Botao variante="secundario" disabled={registrado} onClick={async () => {
-    await acoes.registrarDiarioMotor(proximo, "quantico", prox.jogo);
+          <Botao variante="secundario" disabled={registrado || !!config} title={config ? "Volte ao motor completo para registrar" : ""} onClick={async () => {
+    await acoes.registrarDiarioMotor(proximo.concurso, "quantico", prox.jogo, prox.probs);
     setRegistrado(true);
-  }}>{registrado ? "Registrado no diário" : "Registrar no diário"}</Botao>
+  }}>{registrado ? "Registrado no arquivo" : "Registrar no arquivo de previsões"}</Botao>
         </div>
       </Card>
-      <Card titulo="Teste de padrão temporal">
-        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Embaralha a ordem dos concursos (destrói qualquer memória, "quentes" e pares, mas mantém a frequência global) e treina tudo de novo. Cada rodada leva alguns segundos.</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[10, 20, 50].map((n) => <Botao key={n} variante="discreto" disabled={!!prog} onClick={() => rodarPerm(n)}>{n} embaralhamentos</Botao>)}
-          {prog && <Chip tom="ouro">rodando {prog[0]}/{prog[1]}</Chip>}
+
+      <Card titulo="Testes adversariais">
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>
+          <b style={{ color: T.goldText }}>Padrão temporal:</b> embaralha a ordem dos concursos (destrói memória, Markov, KNN e tendências; mantém a frequência global) e treina tudo de novo.
+          <br /><b style={{ color: T.goldText }}>Scanner de ablação:</b> roda o replay inteiro sem cada família. Família que ao sair melhora o resultado está atrapalhando. Leva cerca de um minuto.
         </div>
-        {perm && <Aviso tom={perm.p < 0.05 ? "bom" : "alerta"}>Ganho real {dec(perm.ganhoReal * 1e3, 3)} milinats/concurso · embaralhados: média {dec(media(perm.nulos) * 1e3, 3)} · p = {dec(perm.p, 3)} — {perm.p < 0.05 ? "há padrão temporal além da frequência." : "nenhum padrão temporal (memória, quentes/frios, pares) além do que a frequência já explica."}</Aviso>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[10, 20].map((n) => <Botao key={n} variante="discreto" disabled={!!prog} onClick={() => rodarPerm(n)}>Temporal · {n} embaralhamentos</Botao>)}
+          <Botao variante="discreto" disabled={!!prog} onClick={rodarScan}>Scanner de ablação</Botao>
+          {prog && <Chip tom="ouro">{prog[0] === "perm" ? "embaralhando" : "ablação"} {prog[1]}/{prog[2]}</Chip>}
+        </div>
+        {perm && <Aviso tom={perm.p < 0.05 ? "bom" : "alerta"}>Ganho real {dec(perm.ganhoReal * 1e3, 3)} milinats/concurso · embaralhados: média {dec(media(perm.nulos) * 1e3, 3)} · p = {dec(perm.p, 3)}: {perm.p < 0.05 ? "há padrão temporal além da frequência." : "nenhum padrão temporal além do que a frequência já explica."}</Aviso>}
+        {scan && <div style={{ marginTop: 12 }}>
+            <Tabela colunas={[
+    { id: "familia", titulo: "Sem a família", render: (l) => nomeFamilia(l.familia) },
+    { id: "dg", titulo: "Ela contribui (ganho)", alinhar: "right", mono: true, render: (l) => `${l.deltaGanho >= 0 ? "+" : ""}${dec(l.deltaGanho * 1e3, 3)}` },
+    { id: "da", titulo: "Δ acertos", alinhar: "right", mono: true, render: (l) => `${l.deltaAcertos >= 0 ? "+" : ""}${dec(l.deltaAcertos, 4)}` },
+    { id: "dr", titulo: "Δ últimos 500", alinhar: "right", mono: true, render: (l) => `${l.deltaRecentes >= 0 ? "+" : ""}${dec(l.deltaRecentes, 3)}` },
+    { id: "v", titulo: "", render: (l) => l.deltaGanho > 1e-4 ? <Chip tom="bom">ajuda</Chip> : l.deltaGanho < -1e-4 ? <Chip tom="alerta">atrapalha</Chip> : <Chip>neutra</Chip> }
+  ]} linhas={scan.linhas.map((l) => ({ ...l, __id: l.familia }))} />
+            {scan.linhas.some((l) => l.deltaGanho < -1e-4) && <div style={{ marginTop: 10 }}>
+                <Botao pequeno variante="secundario" onClick={() => setAtivas(new Set(FAMILIAS_SINAL.filter((f) => !scan.linhas.find((l) => l.familia === f && l.deltaGanho < -1e-4))))}>Sugestão: desligar as que atrapalham (depois "Aplicar e recalcular")</Botao>
+              </div>}
+          </div>}
       </Card>
     </>;
 }
 function Popularidade({ modelo, ultimo }) {
-  const [jogoTxt, setJogoTxt] = useState8("");
+  const [jogoTxt, setJogoTxt] = useState9("");
   const jogo = parseNumeros(jogoTxt);
   const efeitos = modelo.efeitos.slice().sort((a, b) => Math.abs(b.efeito) - Math.abs(a.efeito)).slice(0, 14);
   const maxE = Math.max(...efeitos.map((e) => Math.abs(e.efeito)));
@@ -6717,9 +7300,9 @@ function Popularidade({ modelo, ultimo }) {
     </>;
 }
 function Gerador({ modelo, ultimo, previsaoMotor }) {
-  const [cfg, setCfg] = useState8({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false });
-  const [res, setRes] = useState8(null);
-  const [rodando, setRodando] = useState8(false);
+  const [cfg, setCfg] = useState9({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false });
+  const [res, setRes] = useState9(null);
+  const [rodando, setRodando] = useState9(false);
   const preco = Number(cfg.preco.replace(",", ".")) || 3.5;
   const gerar = () => {
     setRodando(true);
@@ -6789,11 +7372,11 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
     </>;
 }
 function Fechamento({ modelo }) {
-  const [grupoTxt, setGrupoTxt] = useState8("");
-  const [garantia, setGarantia] = useState8(14);
-  const [preco, setPreco] = useState8("3,50");
-  const [res, setRes] = useState8(null);
-  const [prog, setProg] = useState8(null);
+  const [grupoTxt, setGrupoTxt] = useState9("");
+  const [garantia, setGarantia] = useState9(14);
+  const [preco, setPreco] = useState9("3,50");
+  const [res, setRes] = useState9(null);
+  const [prog, setProg] = useState9(null);
   const grupo = parseNumeros(grupoTxt);
   const valido = grupo.length >= 16 && grupo.length <= 20;
   const rodar = async () => {
@@ -6839,15 +7422,15 @@ function Fechamento({ modelo }) {
     </>;
 }
 function AbaQuantico({ app, acoes }) {
-  const [secao, setSecao] = useState8("laudo");
+  const [secao, setSecao] = useState9("laudo");
   const { sorteios, concursos, historicoLaudo } = useMemo6(() => {
     const lista = [...app.resultados].sort((a, b) => a.concurso - b.concurso);
     return { sorteios: lista.map((r) => r.resultado), concursos: lista.map((r) => r.concurso), historicoLaudo: lista.map((r) => ({ concurso: r.concurso, dezenas: r.resultado })) };
   }, [app.resultados]);
   const modelo = useMemo6(() => ajustarPopularidade(HISTORICO), []);
   const ultimo = sorteios[sorteios.length - 1];
-  const proximo = concursos[concursos.length - 1] + 1;
-  const [previsaoMotor, setPrevisaoMotor] = useState8(null);
+  const proximo = estimarProximo(app.resultados);
+  const [previsaoMotor, setPrevisaoMotor] = useState9(null);
   useEffect2(() => {
     if (secao === "gerador" && !previsaoMotor) setTimeout(() => setPrevisaoMotor(prever2(simular2(sorteios).estado)), 50);
   }, [secao]);
@@ -6882,12 +7465,12 @@ var ABAS = [
   ["backup", "Backup"]
 ];
 function App() {
-  const [app, setApp] = useState9(null);
-  const [aba, setAba] = useState9("concurso");
-  const [concursoAberto, setConcursoAberto] = useState9(null);
-  const [simulacao, setSimulacao] = useState9(null);
-  const [calculando, setCalculando] = useState9(false);
-  const [erroSalvar, setErroSalvar] = useState9(null);
+  const [app, setApp] = useState10(null);
+  const [aba, setAba] = useState10("concurso");
+  const [concursoAberto, setConcursoAberto] = useState10(null);
+  const [simulacao, setSimulacao] = useState10(null);
+  const [calculando, setCalculando] = useState10(false);
+  const [erroSalvar, setErroSalvar] = useState10(null);
   const primeiraCarga = useRef(true);
   useEffect3(() => {
     carregar().then(setApp);
@@ -6903,7 +7486,9 @@ function App() {
     }, 400);
     return () => clearTimeout(t);
   }, [app]);
-  const { concursos, meta } = useMemo7(() => app ? montarConcursos(app) : { concursos: [], meta: /* @__PURE__ */ new Map() }, [app?.resultados, app?.mapas, app?.config]);
+  const resultadosEfetivos = useMemo7(() => app ? aplicarCorrecoes(app.resultados, app.correcoes) : [], [app?.resultados, app?.correcoes]);
+  const appEfetivo = useMemo7(() => app ? { ...app, resultados: resultadosEfetivos } : null, [app, resultadosEfetivos]);
+  const { concursos, meta } = useMemo7(() => appEfetivo ? montarConcursos(appEfetivo) : { concursos: [], meta: /* @__PURE__ */ new Map() }, [resultadosEfetivos, app?.mapas, app?.config]);
   useEffect3(() => {
     if (!app) return;
     setCalculando(true);
@@ -6937,21 +7522,31 @@ function App() {
       atualizar((a) => ({ hipoteses: [...a.hipoteses, h] }));
     },
     removerHipotese: (id) => atualizar((a) => ({ hipoteses: a.hipoteses.filter((h) => h.id !== id) })),
+    // Arquivo de previsões: a primeira previsão de cada concurso por motor
+    // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
-      const registros = await Promise.all(Object.keys(MOTORES).map((m) => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral })));
-      atualizar((a) => ({ diario: [...a.diario, ...registros] }));
+      const registros = await Promise.all(Object.keys(MOTORES).map((m) => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null })));
+      atualizar((a) => ({ diario: [...a.diario, ...registros.filter((r) => !a.diario.some((d) => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
-    registrarDiarioMotor: async (concurso, motor, jogo) => {
-      const r = await registrarNoDiario({ concurso, motor, jogo });
-      atualizar((a) => ({ diario: [...a.diario, r] }));
+    registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
+      const r = await registrarNoDiario({ concurso, motor, jogo, probs });
+      atualizar((a) => a.diario.some((d) => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] });
     },
+    corrigirResultado: (concurso, resultado, motivo) => atualizar((a) => ({
+      correcoes: { ...a.correcoes, [concurso]: { resultado, motivo, em: (/* @__PURE__ */ new Date()).toISOString(), original: a.resultados.find((r) => r.concurso === concurso)?.resultado || null } }
+    })),
+    removerCorrecao: (concurso) => atualizar((a) => {
+      const c = { ...a.correcoes };
+      delete c[concurso];
+      return { correcoes: c };
+    }),
     config: (parcial) => atualizar((a) => ({ config: { ...a.config, ...parcial } })),
     substituirTudo: (novo) => setApp(novo),
     zerar: () => setApp(estadoInicial())
   };
   const nMapas = concursos.filter((c) => c.chaves).length;
   const pesoAstral = simulacao?.trilha.at(-1)?.pesoAstral;
-  const props = { app, concursos, meta, acoes, simulacao, calculando };
+  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando };
   return <div style={{ background: `radial-gradient(1200px 600px at 20% -10%, #1A2140 0%, ${T.bg} 55%)`, minHeight: "100vh", color: T.text, fontFamily: T.sans }}>
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "22px 16px 60px" }}>
         <header style={{ marginBottom: 16 }}>

@@ -11,7 +11,11 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
   const [limite, setLimite] = useState(40);
 
   const numerosNovo = parseNumeros(novo.numeros);
-  const podeSalvar = Number(novo.concurso) > 0 && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
+  const jaExisteOficial = app.resultados.some(r => r.concurso === Number(novo.concurso));
+  const podeSalvar = Number(novo.concurso) > 0 && !jaExisteOficial && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
+  const [corrigindo, setCorrigindo] = useState(null); // { concurso, numeros, motivo }
+  const numerosCorrecao = corrigindo ? parseNumeros(corrigindo.numeros) : [];
+  const correcoes = Object.entries(app.correcoes || {});
 
   const linhas = useMemo(() => {
     const porConcurso = new Map(app.resultados.map(r => [r.concurso, r]));
@@ -19,7 +23,7 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
     return [...todos].sort((a, b) => b - a).map(c => {
       const r = porConcurso.get(c);
       const m = app.mapas[c];
-      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, mapa: m, get leitura() { return m ? interpretarMapa(m.texto) : null; } };
+      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, corrigido: r?.corrigido, mapa: m, get leitura() { return m ? interpretarMapa(m.texto) : null; } };
     });
   }, [app.resultados, app.mapas]);
 
@@ -58,6 +62,7 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
         {numerosNovo.length > 0 && <div style={{ marginTop: 8 }}><Bolinhas numeros={numerosNovo} tamanho={24} /></div>}
         <div style={{ marginTop: 10 }}>
           <Botao disabled={!podeSalvar} onClick={() => { acoes.salvarResultado(Number(novo.concurso), novo.data, numerosNovo); setNovo({ concurso: "", data: "", numeros: "" }); }}>Salvar resultado</Botao>
+          {jaExisteOficial && <div style={{ fontSize: 12.5, color: T.alerta, marginTop: 6 }}>Este concurso já existe. Para mudar o resultado, use "Corrigir" na lista abaixo.</div>}
         </div>
       </Card>
 
@@ -84,6 +89,29 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
         )}
       </Card>
 
+      {corrigindo && (
+        <Card titulo={`Corrigir o concurso ${corrigindo.concurso}`}>
+          <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>A correção fica registrada com motivo e data, o resultado original é preservado, e todo o aprendizado, o placar e o diário são recalculados.</div>
+          <Rotulo>Dezenas corretas ({numerosCorrecao.length}/15)</Rotulo>
+          <input style={{ ...estiloInput, fontFamily: T.mono }} value={corrigindo.numeros} onChange={e => setCorrigindo({ ...corrigindo, numeros: e.target.value })} />
+          <div style={{ marginTop: 8 }}><Rotulo>Motivo</Rotulo><input style={estiloInput} value={corrigindo.motivo} placeholder="ex.: conferido no site da Caixa" onChange={e => setCorrigindo({ ...corrigindo, motivo: e.target.value })} /></div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <Botao disabled={!validarResultado(numerosCorrecao) || !corrigindo.motivo.trim() || numerosCorrecao.join() === (app.resultados.find(r => r.concurso === corrigindo.concurso)?.resultado || []).join()} onClick={() => { acoes.corrigirResultado(corrigindo.concurso, numerosCorrecao, corrigindo.motivo.trim()); setCorrigindo(null); }}>Aplicar correção</Botao>
+            <Botao variante="discreto" onClick={() => setCorrigindo(null)}>Cancelar</Botao>
+          </div>
+        </Card>
+      )}
+      {correcoes.length > 0 && (
+        <Card titulo="Correções aplicadas">
+          <Tabela colunas={[
+            { id: "concurso", titulo: "Concurso", mono: true },
+            { id: "de", titulo: "Original → corrigido", render: l => <div><div style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted, textDecoration: "line-through" }}>{(l.original || []).join(" ")}</div><div style={{ fontFamily: T.mono, fontSize: 12 }}>{l.resultado.join(" ")}</div></div> },
+            { id: "motivo", titulo: "Motivo", render: l => <div>{l.motivo}<div style={{ fontSize: 11, color: T.textMuted }}>{new Date(l.em).toLocaleString("pt-BR")}</div></div> },
+            { id: "x", titulo: "", render: l => <Botao pequeno variante="perigo" onClick={() => acoes.removerCorrecao(l.concurso)}>Desfazer</Botao> },
+          ]} linhas={correcoes.map(([c, v]) => ({ __id: c, concurso: Number(c), ...v }))} />
+        </Card>
+      )}
+
       <Card titulo="Concursos" acao={
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
           {[["todos", "Todos"], ["comMapa", "Com mapa"], ["semMapa", "Sem mapa"], ["comErro", "Mapa com erro"]].map(([id, r]) => (
@@ -94,10 +122,11 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
         <Tabela colunas={[
           { id: "concurso", titulo: "Concurso", mono: true },
           { id: "data", titulo: "Data", mono: true },
-          { id: "resultado", titulo: "Resultado", render: l => (l.resultado ? <Bolinhas numeros={l.resultado} tamanho={21} /> : <Chip tom="ouro">aguardando</Chip>) },
+          { id: "resultado", titulo: "Resultado", render: l => (l.resultado ? <div><Bolinhas numeros={l.resultado} tamanho={21} />{l.corrigido && <div style={{ marginTop: 4 }}><Chip tom="alerta">corrigido</Chip></div>}</div> : <Chip tom="ouro">aguardando</Chip>) },
           { id: "mapa", titulo: "Mapa", render: l => (!l.mapa ? <span style={{ color: T.textMuted }}>—</span> : l.leitura.mapa.completo ? <Chip tom={l.leitura.mapa.avisos.length ? "alerta" : "bom"}>{l.leitura.mapa.avisos.length ? `${l.leitura.mapa.avisos.length} avisos` : "✓"}</Chip> : <Chip tom="ruim">erro</Chip>) },
           { id: "acoes", titulo: "", render: l => (
-            <div style={{ display: "flex", gap: 5 }}>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {l.resultado && <Botao pequeno variante="discreto" onClick={() => setCorrigindo({ concurso: l.concurso, numeros: l.resultado.join(" "), motivo: "" })}>Corrigir</Botao>}
               <Botao pequeno variante="discreto" onClick={() => abrirConcurso(l.concurso)}>{l.mapa ? "Abrir" : "Colar mapa"}</Botao>
               {l.mapa && <Botao pequeno variante="perigo" onClick={() => { if (confirm(`Remover o mapa do concurso ${l.concurso}?`)) acoes.removerMapa(l.concurso); }}>Remover mapa</Botao>}
             </div>

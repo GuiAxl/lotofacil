@@ -64,22 +64,61 @@ export function avaliarHipotese(h, concursos) {
   return { status, decididaNo, llr, limiteA, limiteB, tentativas, acertos: acertosN, taxa: tentativas ? acertosN / tentativas : null, pValor, concursos: usados };
 }
 
-// ── Diário prospectivo ────────────────────────────────────────────────────
+// ── Arquivo de previsões reais (diário prospectivo) ───────────────────────
 // Um jogo só vale como acerto real se foi registrado ANTES do resultado
-// existir no sistema. O registro guarda data/hora e hash; não pode ser editado.
-export async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null }) {
-  const base = { concurso, motor, jogo: [...jogo].sort((a, b) => a - b), pesoAstral, registradoEm: new Date().toISOString() };
+// existir no sistema. A PRIMEIRA previsão de cada concurso por motor fica
+// congelada (data/hora + hash, sem edição). Quando há probabilidades, elas
+// também são arquivadas, o que permite medir Brier e log-loss reais.
+export async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null }) {
+  const base = {
+    concurso, motor, jogo: [...jogo].sort((a, b) => a - b), pesoAstral,
+    probs: probs ? Array.from({ length: 25 }, (_, i) => Math.round(probs[i + 1] * 1e5) / 1e5) : null,
+    registradoEm: new Date().toISOString(),
+  };
   return { id: `dia_${Date.now().toString(36)}_${motor}`, ...base, hash: await hashConteudo(base) };
 }
 
+export function validarPrevisao({ jogo, probs }) {
+  const erros = [];
+  if (!Array.isArray(jogo) || jogo.length !== 15 || new Set(jogo).size !== 15 || jogo.some(n => !Number.isInteger(n) || n < 1 || n > 25)) erros.push("jogo inválido");
+  if (probs) {
+    const soma = probs.slice(1).reduce((a, b) => a + b, 0);
+    if (probs.slice(1).some(p => !(p > 0 && p < 1)) || Math.abs(soma - 15) > 0.01) erros.push("universo de probabilidades inválido (precisa somar 15)");
+  }
+  return erros;
+}
+
+// Placar com "confiança de produção": só previsões congeladas antes do
+// resultado. Reavaliado a cada render, então uma correção de resultado
+// reavalia tudo automaticamente.
 export function placarDiario(diario, resultadosPorConcurso) {
   const porMotor = {};
-  for (const r of diario) {
-    const res = resultadosPorConcurso.get(r.concurso);
-    const linha = (porMotor[r.motor] ||= { jogos: 0, apurados: 0, soma: 0, lista: [] });
-    linha.jogos++;
-    if (res) { const a = acertos(r.jogo, res); linha.apurados++; linha.soma += a; linha.lista.push({ concurso: r.concurso, acertos: a }); }
+  const primeira = new Map();
+  for (const r of [...diario].sort((a, b) => a.registradoEm.localeCompare(b.registradoEm))) {
+    const k = `${r.concurso}|${r.motor}`;
+    if (!primeira.has(k)) primeira.set(k, r);
   }
-  for (const l of Object.values(porMotor)) l.media = l.apurados ? l.soma / l.apurados : null;
+  for (const r of primeira.values()) {
+    const res = resultadosPorConcurso.get(r.concurso);
+    const l = (porMotor[r.motor] ||= { jogos: 0, apurados: 0, soma: 0, lista: [], somaBrier: 0, somaLog: 0, comProbs: 0 });
+    l.jogos++;
+    if (!res) continue;
+    const a = acertos(r.jogo, res);
+    l.apurados++; l.soma += a; l.lista.push({ concurso: r.concurso, acertos: a });
+    if (r.probs) {
+      const s = new Set(res);
+      let b = 0, lg = 0;
+      r.probs.forEach((p, i) => { const y = s.has(i + 1) ? 1 : 0; b += (p - y) ** 2; const q = Math.min(1 - 1e-9, Math.max(1e-9, p)); lg -= y ? Math.log(q) : Math.log(1 - q); });
+      l.somaBrier += b / 25; l.somaLog += lg / 25; l.comProbs++;
+    }
+  }
+  for (const l of Object.values(porMotor)) {
+    l.lista.sort((a, b) => a.concurso - b.concurso);
+    l.media = l.apurados ? l.soma / l.apurados : null;
+    l.z = l.apurados ? ((l.media - 9) / 0.949) * Math.sqrt(l.apurados) : null;
+    l.ganhoBrier = l.comProbs ? 1 - l.somaBrier / l.comProbs / (P0 * (1 - P0)) : null;
+    l.ganhoLog = l.comProbs ? -(P0 * Math.log(P0) + (1 - P0) * Math.log(1 - P0)) - l.somaLog / l.comProbs : null;
+    l.confiancaProducao = l.apurados < 30 ? "amostra pequena" : l.z > 2 && (l.ganhoLog == null || l.ganhoLog > 0) ? "vantagem real" : "sem vantagem";
+  }
   return porMotor;
 }

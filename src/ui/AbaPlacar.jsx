@@ -4,6 +4,8 @@ import { pct, dec } from "./estado.js";
 import { MOTORES, testePermutacao } from "../estatistica/motor.js";
 import { media, desvio, DP_ACERTOS_ACASO } from "../estatistica/matematica.js";
 import { placarDiario } from "../estatistica/laboratorio.js";
+import { relatorio } from "../estatistica/metricas.js";
+import Diagnostico from "./Diagnostico.jsx";
 
 export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
   const [perm, setPerm] = useState(null);
@@ -12,6 +14,7 @@ export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
 
   const resultadosPorConcurso = useMemo(() => new Map(app.resultados.map(r => [r.concurso, r.resultado])), [app.resultados]);
   const diario = useMemo(() => placarDiario(app.diario, resultadosPorConcurso), [app.diario, resultadosPorConcurso]);
+  const rel = useMemo(() => (simulacao?.porMotor.astral?.registros.length >= 20 ? relatorio(simulacao.porMotor.astral.registros) : null), [simulacao]);
 
   const rodarPerm = async () => {
     setPerm(null); setProgresso([0, nPerm]);
@@ -86,6 +89,7 @@ export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
             )}
           </Card>
           {veredito && <Aviso tom={veredito.tom}>{veredito.txt}</Aviso>}
+          <Diagnostico rel={rel} titulo="Diagnóstico científico · Astral" />
           <Card titulo="Distribuição de acertos · Astral">
             <DistribuicaoAcertos acertos={simulacao.porMotor.astral.acertos} />
           </Card>
@@ -96,14 +100,17 @@ export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
         </>
       )}
 
-      <Card titulo="Placar prospectivo (diário)">
-        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Só jogos registrados antes do sorteio. É a prova definitiva.</div>
-        <Tabela vazio="Nenhum jogo registrado ainda. Na aba Concurso, gere a previsão de um sorteio futuro e registre." colunas={[
+      <Card titulo="Arquivo de previsões reais (produção)">
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Só conta a primeira previsão de cada concurso, congelada antes do sorteio. É a prova definitiva: se um motor tiver vantagem real, ela aparece aqui.</div>
+        <Tabela vazio="Nenhum jogo registrado ainda. Nas abas Concurso ou Quântico, gere a previsão de um sorteio futuro e registre." colunas={[
           { id: "motor", titulo: "Motor", render: l => MOTORES[l.__id]?.nome || (l.__id === "quantico" ? "Quântico" : l.__id) },
           { id: "jogos", titulo: "Registrados", alinhar: "right", mono: true },
           { id: "apurados", titulo: "Apurados", alinhar: "right", mono: true },
           { id: "media", titulo: "Média", alinhar: "right", mono: true, render: l => dec(l.media, 2) },
-          { id: "ult", titulo: "Últimos", render: l => l.lista.slice(-6).map(x => `${x.concurso}: ${x.acertos}`).join(" · ") },
+          { id: "z", titulo: "z", alinhar: "right", mono: true, render: l => dec(l.z, 2) },
+          { id: "brier", titulo: "Ganho Brier", alinhar: "right", mono: true, render: l => (l.ganhoBrier == null ? "—" : `${dec(l.ganhoBrier * 100, 2)}%`) },
+          { id: "conf", titulo: "Confiança de produção", render: l => <Chip tom={l.confiancaProducao === "vantagem real" ? "bom" : l.confiancaProducao === "amostra pequena" ? "neutro" : "alerta"}>{l.confiancaProducao}</Chip> },
+          { id: "ult", titulo: "Últimos", render: l => l.lista.slice(-5).map(x => `${x.concurso}: ${x.acertos}`).join(" · ") },
         ]} linhas={Object.entries(diario).map(([m, l]) => ({ ...l, __id: m }))} />
       </Card>
     </>

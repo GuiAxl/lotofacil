@@ -5,7 +5,7 @@
 // com probabilidade de ser real, hipóteses pré-registradas e diário prospectivo.
 import { useState, useEffect, useMemo, useRef } from "react";
 import { T, Chip } from "./ui/base.jsx";
-import { carregar, salvar, estadoInicial, montarConcursos, pct } from "./ui/estado.js";
+import { carregar, salvar, estadoInicial, montarConcursos, aplicarCorrecoes, pct } from "./ui/estado.js";
 import { simular, MOTORES } from "./estatistica/motor.js";
 import { criarHipotese, registrarNoDiario } from "./estatistica/laboratorio.js";
 import AbaConcurso from "./ui/AbaConcurso.jsx";
@@ -40,7 +40,12 @@ export default function App() {
     return () => clearTimeout(t);
   }, [app]);
 
-  const { concursos, meta } = useMemo(() => (app ? montarConcursos(app) : { concursos: [], meta: new Map() }), [app?.resultados, app?.mapas, app?.config]);
+  // Visão efetiva: resultados oficiais com as correções manuais aplicadas.
+  // Todas as abas leem daqui, então corrigir um concurso invalida e refaz
+  // automaticamente todo o aprendizado, o placar e o diário.
+  const resultadosEfetivos = useMemo(() => (app ? aplicarCorrecoes(app.resultados, app.correcoes) : []), [app?.resultados, app?.correcoes]);
+  const appEfetivo = useMemo(() => (app ? { ...app, resultados: resultadosEfetivos } : null), [app, resultadosEfetivos]);
+  const { concursos, meta } = useMemo(() => (appEfetivo ? montarConcursos(appEfetivo) : { concursos: [], meta: new Map() }), [resultadosEfetivos, app?.mapas, app?.config]);
 
   // Simulação honesta completa, recalculada quando os dados mudam.
   useEffect(() => {
@@ -69,14 +74,20 @@ export default function App() {
     })),
     criarHipotese: async dados => { const h = await criarHipotese(dados); atualizar(a => ({ hipoteses: [...a.hipoteses, h] })); },
     removerHipotese: id => atualizar(a => ({ hipoteses: a.hipoteses.filter(h => h.id !== id) })),
+    // Arquivo de previsões: a primeira previsão de cada concurso por motor
+    // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
-      const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral })));
-      atualizar(a => ({ diario: [...a.diario, ...registros] }));
+      const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null })));
+      atualizar(a => ({ diario: [...a.diario, ...registros.filter(r => !a.diario.some(d => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
-    registrarDiarioMotor: async (concurso, motor, jogo) => {
-      const r = await registrarNoDiario({ concurso, motor, jogo });
-      atualizar(a => ({ diario: [...a.diario, r] }));
+    registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
+      const r = await registrarNoDiario({ concurso, motor, jogo, probs });
+      atualizar(a => (a.diario.some(d => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] }));
     },
+    corrigirResultado: (concurso, resultado, motivo) => atualizar(a => ({
+      correcoes: { ...a.correcoes, [concurso]: { resultado, motivo, em: new Date().toISOString(), original: a.resultados.find(r => r.concurso === concurso)?.resultado || null } },
+    })),
+    removerCorrecao: concurso => atualizar(a => { const c = { ...a.correcoes }; delete c[concurso]; return { correcoes: c }; }),
     config: parcial => atualizar(a => ({ config: { ...a.config, ...parcial } })),
     substituirTudo: novo => setApp(novo),
     zerar: () => setApp(estadoInicial()),
@@ -84,7 +95,7 @@ export default function App() {
 
   const nMapas = concursos.filter(c => c.chaves).length;
   const pesoAstral = simulacao?.trilha.at(-1)?.pesoAstral;
-  const props = { app, concursos, meta, acoes, simulacao, calculando };
+  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando };
 
   return (
     <div style={{ background: `radial-gradient(1200px 600px at 20% -10%, #1A2140 0%, ${T.bg} 55%)`, minHeight: "100vh", color: T.text, fontFamily: T.sans }}>

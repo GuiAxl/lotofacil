@@ -12,8 +12,32 @@ export function estadoInicial() {
     mapas: {},
     hipoteses: [],
     diario: [],
+    correcoes: {},
     config: { usarLentos: false, minTreino: 30 },
   };
+}
+
+// Correções manuais de resultado (ex.: erro na planilha). Ficam num registro
+// separado com motivo e data; o resultado oficial original não é apagado.
+// Tudo que depende do resultado (motores, placar, diário) é recalculado a
+// partir da versão corrigida.
+export function aplicarCorrecoes(resultados, correcoes = {}) {
+  if (!correcoes || !Object.keys(correcoes).length) return resultados;
+  return resultados.map(r => (correcoes[r.concurso] ? { ...r, resultado: correcoes[r.concurso].resultado, corrigido: true, original: r.resultado } : r));
+}
+
+// Próximo concurso e data estimada: a Lotofácil sorteia de segunda a sábado.
+// Feriados não são considerados (a data é uma estimativa).
+export function estimarProximo(resultados) {
+  const ultimo = resultados[resultados.length - 1];
+  const m = String(ultimo?.data || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  let data = "";
+  if (m) {
+    const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+    do d.setUTCDate(d.getUTCDate() + 1); while (d.getUTCDay() === 0);
+    data = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+  }
+  return { concurso: (ultimo?.concurso || 0) + 1, data };
 }
 
 export async function carregar() {
@@ -52,6 +76,7 @@ export function mesclarComInicial(salvo) {
     mapas: salvo.mapas || {},
     hipoteses: salvo.hipoteses || [],
     diario: salvo.diario || [],
+    correcoes: salvo.correcoes || {},
     config: { ...base.config, ...(salvo.config || {}) },
   };
 }
