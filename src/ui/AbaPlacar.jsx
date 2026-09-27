@@ -99,7 +99,7 @@ export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
       <Card titulo="Placar prospectivo (diário)">
         <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Só jogos registrados antes do sorteio. É a prova definitiva.</div>
         <Tabela vazio="Nenhum jogo registrado ainda. Na aba Concurso, gere a previsão de um sorteio futuro e registre." colunas={[
-          { id: "motor", titulo: "Motor", render: l => MOTORES[l.__id]?.nome || l.__id },
+          { id: "motor", titulo: "Motor", render: l => MOTORES[l.__id]?.nome || (l.__id === "quantico" ? "Quântico" : l.__id) },
           { id: "jogos", titulo: "Registrados", alinhar: "right", mono: true },
           { id: "apurados", titulo: "Apurados", alinhar: "right", mono: true },
           { id: "media", titulo: "Média", alinhar: "right", mono: true, render: l => dec(l.media, 2) },

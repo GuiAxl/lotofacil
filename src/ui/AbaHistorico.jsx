@@ -14,12 +14,12 @@ export default function AbaHistorico({ app, acoes, abrirConcurso }) {
   const podeSalvar = Number(novo.concurso) > 0 && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
 
   const linhas = useMemo(() => {
-    const todos = new Set([...app.resultados.map(r => r.concurso), ...Object.keys(app.mapas).map(Number)]);
+    const porConcurso = new Map(app.resultados.map(r => [r.concurso, r]));
+    const todos = new Set([...porConcurso.keys(), ...Object.keys(app.mapas).map(Number)]);
     return [...todos].sort((a, b) => b - a).map(c => {
-      const r = app.resultados.find(x => x.concurso === c);
+      const r = porConcurso.get(c);
       const m = app.mapas[c];
-      const leitura = m ? interpretarMapa(m.texto) : null;
-      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, mapa: m, leitura };
+      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, mapa: m, get leitura() { return m ? interpretarMapa(m.texto) : null; } };
     });
   }, [app.resultados, app.mapas]);
 

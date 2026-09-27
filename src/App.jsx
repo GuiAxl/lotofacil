@@ -14,10 +14,11 @@ import AbaSinais from "./ui/AbaSinais.jsx";
 import AbaLaboratorio from "./ui/AbaLaboratorio.jsx";
 import AbaPlacar from "./ui/AbaPlacar.jsx";
 import AbaBackup from "./ui/AbaBackup.jsx";
+import AbaQuantico from "./ui/AbaQuantico.jsx";
 
 const ABAS = [
   ["concurso", "Concurso"], ["historico", "Histórico"], ["sinais", "Sinais"],
-  ["laboratorio", "Laboratório"], ["placar", "Placar"], ["backup", "Backup"],
+  ["laboratorio", "Laboratório"], ["placar", "Placar"], ["quantico", "Quântico ⚛"], ["backup", "Backup"],
 ];
 
 export default function App() {
@@ -72,6 +73,10 @@ export default function App() {
       const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral })));
       atualizar(a => ({ diario: [...a.diario, ...registros] }));
     },
+    registrarDiarioMotor: async (concurso, motor, jogo) => {
+      const r = await registrarNoDiario({ concurso, motor, jogo });
+      atualizar(a => ({ diario: [...a.diario, r] }));
+    },
     config: parcial => atualizar(a => ({ config: { ...a.config, ...parcial } })),
     substituirTudo: novo => setApp(novo),
     zerar: () => setApp(estadoInicial()),
@@ -106,6 +111,7 @@ export default function App() {
         {aba === "sinais" && <AbaSinais {...props} />}
         {aba === "laboratorio" && <AbaLaboratorio {...props} />}
         {aba === "placar" && <AbaPlacar {...props} />}
+        {aba === "quantico" && <AbaQuantico {...props} />}
         {aba === "backup" && <AbaBackup {...props} />}
       </div>
     </div>

@@ -1,0 +1,70 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { HISTORICO } from "../src/dados/historico.js";
+import { gerarLaudo } from "../src/quantico/laudo.js";
+import { simular } from "../src/quantico/motor.js";
+import { ajustarPopularidade, avaliarPopularidade } from "../src/quantico/popularidade.js";
+import { gerarJogos, retornoEsperado, fechamento } from "../src/quantico/otimizador.js";
+import { pQuiQuadrado, pAcertos } from "../src/quantico/distribuicoes.js";
+import { rng, embaralhar, media } from "../src/estatistica/matematica.js";
+
+const aleatorios = (n, semente) => { const r = rng(semente); return Array.from({ length: n }, () => embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15).sort((a, b) => a - b)); };
+
+test("histórico completo: 3789 concursos válidos e em ordem", () => {
+  assert.equal(HISTORICO.length, 3789);
+  HISTORICO.forEach((h, i) => { assert.equal(h.concurso, i + 1); assert.equal(new Set(h.dezenas).size, 15); });
+  assert.deepEqual(HISTORICO[3765].dezenas, [1, 2, 3, 5, 8, 9, 11, 13, 14, 16, 17, 19, 21, 23, 24]);
+});
+
+test("distribuições: χ² e hipergeométrica", () => {
+  assert.ok(Math.abs(pQuiQuadrado(36.415, 24) - 0.05) < 0.002);
+  let s = 0; for (let k = 0; k <= 15; k++) s += pAcertos(k);
+  assert.ok(Math.abs(s - 1) < 1e-9);
+  assert.ok(Math.abs(pAcertos(11) - 0.0877) < 0.0005);
+});
+
+test("laudo calibrado: sorteios aleatórios não acusam desvio (e o χ² de frequência tem média ≈ 24)", () => {
+  const stats = [];
+  for (let s = 1; s <= 12; s++) {
+    const l = gerarLaudo(aleatorios(1500, s).map(d => ({ dezenas: d, concurso: 0 })));
+    stats.push(Number(l.testes[0].estatistica.match(/χ² = ([\d.]+)/)[1]));
+    assert.ok(l.desvios <= 1, `semente ${s}: ${l.desvios} desvios`);
+  }
+  const m = media(stats);
+  assert.ok(m > 18 && m < 30, `média χ² ${m}`);
+});
+
+test("motor quântico: acaso fica sem confiança; padrão plantado é encontrado", () => {
+  const acaso = simular(aleatorios(1200, 5), { aquecimento: 100 });
+  assert.ok(acaso.pontos.at(-1).valor < 0.7, `confiança no acaso ${acaso.pontos.at(-1).valor}`);
+  const base = aleatorios(1200, 6);
+  const plantado = base.map((d, i) => (i > 0 && base[i - 1].includes(2) && !d.includes(1) ? [...d.slice(1), 1].sort((a, b) => a - b) : d));
+  const r = simular(plantado, { aquecimento: 100 });
+  assert.ok(r.pontos.at(-1).valor > 0.95, `confiança no plantado ${r.pontos.at(-1).valor}`);
+  assert.ok(media(r.acertos) > media(acaso.acertos));
+});
+
+test("popularidade: jogo aleatório ≈ 1, modelo melhora a validação", () => {
+  const m = ajustarPopularidade(HISTORICO);
+  assert.ok(m.validacao.r2Modelo > m.validacao.r2Base);
+  const ult = HISTORICO.at(-1).dezenas;
+  const indices = aleatorios(400, 9).map(j => avaliarPopularidade(m, j, ult).indice);
+  const med = media(indices);
+  assert.ok(med > 0.9 && med < 1.1, `média ${med}`);
+});
+
+test("gerador respeita fixos/excluídos e melhora o retorno esperado", () => {
+  const modelo = ajustarPopularidade(HISTORICO), ultimo = HISTORICO.at(-1).dezenas;
+  const jogos = gerarJogos({ quantidade: 3, modelo, ultimo, fixos: [7, 13], excluidos: [1, 25], iteracoes: 8000, semente: 4 });
+  jogos.forEach(j => { assert.equal(j.length, 15); assert.ok(j.includes(7) && j.includes(13)); assert.ok(!j.includes(1) && !j.includes(25)); });
+  const medioAleat = media(aleatorios(200, 2).map(j => retornoEsperado(j, { modelo, ultimo, preco: 3.5 }).valor));
+  const medioGerado = media(jogos.map(j => retornoEsperado(j, { modelo, ultimo, preco: 3.5 }).valor));
+  assert.ok(medioGerado > medioAleat, `${medioGerado} vs ${medioAleat}`);
+});
+
+test("fechamento 18 dezenas / 14 pontos: garantia verificada em todos os 816 cenários", async () => {
+  const f = await fechamento(Array.from({ length: 18 }, (_, i) => i + 1), 14);
+  assert.equal(f.cenarios, 816);
+  assert.ok(f.verificado);
+  assert.ok(f.jogos.length <= 26, `${f.jogos.length} jogos`);
+});

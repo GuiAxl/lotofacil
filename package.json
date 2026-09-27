@@ -5,9 +5,9 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "build": "node scripts/build.mjs",
-    "resultados": "node scripts/gerar-resultados.mjs",
     "extrair": "node auditoria/extrair-motor.mjs",
-    "auditoria": "node auditoria/extrair-motor.mjs && node auditoria/validar.mjs"
+    "auditoria": "node auditoria/extrair-motor.mjs && node auditoria/validar.mjs",
+    "historico": "node scripts/gerar-historico.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",

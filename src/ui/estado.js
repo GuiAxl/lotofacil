@@ -35,12 +35,16 @@ export async function salvar(estado) {
   if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(CHAVE_STORAGE, texto);
 }
 
-// Garante que os resultados oficiais embutidos sempre existam, sem apagar o
-// que o usuário adicionou.
+// Garante que os resultados oficiais embutidos sempre existam (e prevaleçam),
+// sem apagar concursos novos que o usuário adicionou.
 export function mesclarComInicial(salvo) {
   const base = estadoInicial();
   const porConcurso = new Map(base.resultados.map(r => [r.concurso, r]));
-  for (const r of salvo.resultados || []) if (validarResultado(r.resultado)) porConcurso.set(Number(r.concurso), { concurso: Number(r.concurso), data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b) });
+  // O resultado oficial embutido sempre vence; do salvo só entram concursos novos.
+  for (const r of salvo.resultados || []) {
+    const c = Number(r.concurso);
+    if (!porConcurso.has(c) && validarResultado(r.resultado)) porConcurso.set(c, { concurso: c, data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b) });
+  }
   return {
     ...base,
     ...salvo,
