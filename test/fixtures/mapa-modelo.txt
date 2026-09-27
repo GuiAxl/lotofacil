@@ -1,0 +1,79 @@
+Sun in Aries 23°59’, in 6th House
+Moon in Pisces 7°27’, in 4th House
+Mercury in Pisces 28°19’, in 5th House
+Venus in Taurus 17°31’, in 6th House
+Mars in Aries 3°12’, in 5th House
+Jupiter in Cancer 16°51’, in 8th House
+Saturn in Aries 7°08’, in 5th House
+Uranus in Taurus 29°22’, in 7th House
+Neptune in Aries 2°40’, in 5th House
+Pluto in Aquarius 5°23’, in 3rd House
+North Node in Pisces 6°43’, Retrograde, in 4th House
+Lilith in Sagittarius 12°47’, in 1st House
+Chiron in Aries 26°28’, in 6th House
+Fortune in Capricorn 13°53’, in 2nd House
+Vertex in Aries 24°43’, in 6th House
+ASC in Scorpio 27°21’
+MC in Leo 13°58’
+
+1st House in Scorpio 27°21’
+2nd House in Sagittarius 25°54’
+3rd House in Capricorn 19°42’
+4th House in Aquarius 13°58’
+5th House in Pisces 13°48’
+6th House in Aries 21°04’
+7th House in Taurus 27°21’
+8th House in Gemini 25°54’
+9th House in Cancer 19°42’
+10th House in Leo 13°58’
+11th House in Virgo 13°48’
+12th House in Libra 21°04’
+
+Sun Octile Moon (Orb: 1°32’, Applying)
+Mercury Sextile Uranus (Orb: 1°02’, Applying)
+Venus Octile Mars (Orb: 0°41’, Applying)
+Venus Sextile Jupiter (Orb: 0°39’, Separating)
+Venus Octile Neptune (Orb: 0°09’, Applying)
+Mars Conjunction Neptune (Orb: 0°31’, Separating)
+Mars Sextile Pluto (Orb: 2°11’, Applying)
+Jupiter Octile Uranus (Orb: 2°29’, Separating)
+Saturn Sextile Pluto (Orb: 1°45’, Separating)
+Neptune Sextile Pluto (Orb: 2°42’, Applying)
+
+Ascendant Trine Mercury (Orb: 0°58’, Applying)
+Ascendant Opposition Uranus (Orb: 2°00’, Applying)
+Ascendant Quincunx Chiron (Orb: 0°52’, Separating)
+DSC Sextile Mercury (Orb: 0°58’, Applying)
+DSC Conjunction Uranus (Orb: 2°00’, Applying)
+MC Tri-Octile Mercury (Orb: 0°38’, Separating)
+MC Trine Lilith (Orb: 1°11’, Separating)
+IC Octile Mercury (Orb: 0°38’, Separating)
+IC Quincunx Jupiter (Orb: 2°52’, Applying)
+IC Sextile Lilith (Orb: 1°11’, Separating)
+North Node Octile Sun (Orb: 2°16’, Separating)
+North Node Conjunction Moon (Orb: 0°44’, Separating)
+Lilith Tri-Octile Chiron (Orb: 1°18’, Separating)
+Chiron Conjunction Sun (Orb: 2°28’, Applying)
+Fortune Opposition Jupiter (Orb: 2°57’, Applying)
+Fortune Tri-Octile Uranus (Orb: 0°28’, Applying)
+Fortune Octile Ascendant (Orb: 1°32’, Separating)
+Fortune Quincunx MC (Orb: 0°04’, Applying)
+Fortune Tri-Octile DSC (Orb: 1°32’, Separating)
+Vertex Conjunction Sun (Orb: 0°43’, Separating)
+Vertex Octile Moon (Orb: 2°15’, Separating)
+Vertex Conjunction Chiron (Orb: 1°45’, Applying)
+Vertex Quincunx Ascendant (Orb: 2°37’, Separating)
+
+Sun: 0°58’48’’ (Average, cca 0.99x avg speed)
+Moon: 13°18’33’’ (Average, cca 1.01x avg speed)
+Mercury: 1°22’08’’ (Average, cca 0.99x avg speed)
+Venus: 1°13’23’’ (Average, cca 1.02x avg speed)
+Mars: 0°46’36’’ (Fast, cca 1.48x avg speed)
+Jupiter: 0°06’01’’ (Fast, cca 1.21x avg speed)
+Saturn: 0°07’17’’ (Fast, cca 3.62x avg speed)
+Uranus: 0°02’59’’ (Fast, cca 4.25x avg speed)
+Neptune: 0°02’09’’ (Fast, cca 5.56x avg speed)
+Pluto: 0°00’37’’ (Fast, cca 2.56x avg speed)
+North Node: -0°03’10’’ (Retrograde, cca 1x avg speed)
+Lilith: 0°06’43’’ (Average, cca 1.01x avg speed)
+Chiron: 0°03’36’’ (Fast, cca 8.35x avg speed)

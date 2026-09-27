@@ -1,0 +1,110 @@
+import { useState, useMemo } from "react";
+import { T, Card, Botao, Chip, Rotulo, Bolinhas, Tabela, Aviso, Metrica, estiloInput } from "./base.jsx";
+import { interpretarMapa, parseNumeros, validarResultado } from "./estado.js";
+import { dividirMapasEmLote } from "../astro/parser.js";
+
+export default function AbaHistorico({ app, acoes, abrirConcurso }) {
+  const [novo, setNovo] = useState({ concurso: "", data: "", numeros: "" });
+  const [lote, setLote] = useState("");
+  const [relatorioLote, setRelatorioLote] = useState(null);
+  const [filtro, setFiltro] = useState("todos");
+  const [limite, setLimite] = useState(40);
+
+  const numerosNovo = parseNumeros(novo.numeros);
+  const podeSalvar = Number(novo.concurso) > 0 && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
+
+  const linhas = useMemo(() => {
+    const todos = new Set([...app.resultados.map(r => r.concurso), ...Object.keys(app.mapas).map(Number)]);
+    return [...todos].sort((a, b) => b - a).map(c => {
+      const r = app.resultados.find(x => x.concurso === c);
+      const m = app.mapas[c];
+      const leitura = m ? interpretarMapa(m.texto) : null;
+      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, mapa: m, leitura };
+    });
+  }, [app.resultados, app.mapas]);
+
+  const filtradas = linhas.filter(l => filtro === "todos" || (filtro === "comMapa" && l.mapa) || (filtro === "semMapa" && !l.mapa) || (filtro === "comErro" && l.leitura && !l.leitura.mapa.completo));
+  const nMapas = linhas.filter(l => l.mapa).length, nOk = linhas.filter(l => l.leitura?.mapa.completo).length;
+
+  const analisarLote = () => {
+    const blocos = dividirMapasEmLote(lote);
+    setRelatorioLote(blocos.map(b => {
+      const { mapa, sinais } = interpretarMapa(b.texto);
+      return { ...b, completo: mapa.completo, avisos: mapa.avisos.length, sinais: sinais.length, jaExiste: !!app.mapas[b.concurso] };
+    }));
+  };
+  const importarLote = () => {
+    acoes.importarMapas(relatorioLote.map(b => ({ concurso: b.concurso, texto: b.texto })));
+    setRelatorioLote(null); setLote("");
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        <Metrica rotulo="Concursos com resultado" valor={app.resultados.length} />
+        <Metrica rotulo="Mapas salvos" valor={nMapas} />
+        <Metrica rotulo="Mapas completos" valor={nOk} tom={nOk === nMapas ? "bom" : "alerta"} detalhe="só estes entram no motor" />
+      </div>
+
+      <Card titulo="Adicionar resultado">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+          <div><Rotulo>Concurso</Rotulo><input style={estiloInput} value={novo.concurso} onChange={e => setNovo({ ...novo, concurso: e.target.value.replace(/\D/g, "") })} /></div>
+          <div><Rotulo>Data</Rotulo><input style={estiloInput} placeholder="dd/mm/aaaa" value={novo.data} onChange={e => setNovo({ ...novo, data: e.target.value })} /></div>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <Rotulo>15 dezenas ({numerosNovo.length}/15)</Rotulo>
+          <input style={{ ...estiloInput, fontFamily: T.mono }} placeholder="01 02 04 05 …" value={novo.numeros} onChange={e => setNovo({ ...novo, numeros: e.target.value })} />
+        </div>
+        {numerosNovo.length > 0 && <div style={{ marginTop: 8 }}><Bolinhas numeros={numerosNovo} tamanho={24} /></div>}
+        <div style={{ marginTop: 10 }}>
+          <Botao disabled={!podeSalvar} onClick={() => { acoes.salvarResultado(Number(novo.concurso), novo.data, numerosNovo); setNovo({ concurso: "", data: "", numeros: "" }); }}>Salvar resultado</Botao>
+        </div>
+      </Card>
+
+      <Card titulo="Importar mapas em lote">
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8, lineHeight: 1.5 }}>
+          Cole vários mapas em inglês, cada um precedido de uma linha com o número do concurso: <code style={{ fontFamily: T.mono, color: T.goldText }}>#3650</code>, <code style={{ fontFamily: T.mono, color: T.goldText }}>Concurso 3650</code> ou <code style={{ fontFamily: T.mono, color: T.goldText }}>3650:</code>
+        </div>
+        <textarea rows={8} value={lote} onChange={e => { setLote(e.target.value); setRelatorioLote(null); }} style={{ ...estiloInput, fontFamily: T.mono, fontSize: 12 }} placeholder={"#3650\nSun in Aries 10°12’, in 6th House\n…\n\n#3651\n…"} />
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <Botao variante="secundario" disabled={!lote.trim()} onClick={analisarLote}>Conferir</Botao>
+          {relatorioLote?.length > 0 && <Botao onClick={importarLote}>Importar {relatorioLote.length} mapas</Botao>}
+        </div>
+        {relatorioLote && (
+          <div style={{ marginTop: 12 }}>
+            {!relatorioLote.length && <Aviso>Nenhum cabeçalho de concurso encontrado.</Aviso>}
+            <Tabela colunas={[
+              { id: "concurso", titulo: "Concurso", mono: true },
+              { id: "status", titulo: "Leitura", render: l => (l.completo ? <Chip tom="bom">completo</Chip> : <Chip tom="ruim">incompleto</Chip>) },
+              { id: "avisos", titulo: "Avisos", alinhar: "right", mono: true },
+              { id: "sinais", titulo: "Sinais", alinhar: "right", mono: true },
+              { id: "ja", titulo: "", render: l => (l.jaExiste ? <Chip tom="alerta">substitui o salvo</Chip> : null) },
+            ]} linhas={relatorioLote.map(l => ({ ...l, __id: l.concurso }))} />
+          </div>
+        )}
+      </Card>
+
+      <Card titulo="Concursos" acao={
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          {[["todos", "Todos"], ["comMapa", "Com mapa"], ["semMapa", "Sem mapa"], ["comErro", "Mapa com erro"]].map(([id, r]) => (
+            <Botao key={id} pequeno variante={filtro === id ? "secundario" : "discreto"} onClick={() => setFiltro(id)}>{r}</Botao>
+          ))}
+        </div>
+      }>
+        <Tabela colunas={[
+          { id: "concurso", titulo: "Concurso", mono: true },
+          { id: "data", titulo: "Data", mono: true },
+          { id: "resultado", titulo: "Resultado", render: l => (l.resultado ? <Bolinhas numeros={l.resultado} tamanho={21} /> : <Chip tom="ouro">aguardando</Chip>) },
+          { id: "mapa", titulo: "Mapa", render: l => (!l.mapa ? <span style={{ color: T.textMuted }}>—</span> : l.leitura.mapa.completo ? <Chip tom={l.leitura.mapa.avisos.length ? "alerta" : "bom"}>{l.leitura.mapa.avisos.length ? `${l.leitura.mapa.avisos.length} avisos` : "✓"}</Chip> : <Chip tom="ruim">erro</Chip>) },
+          { id: "acoes", titulo: "", render: l => (
+            <div style={{ display: "flex", gap: 5 }}>
+              <Botao pequeno variante="discreto" onClick={() => abrirConcurso(l.concurso)}>{l.mapa ? "Abrir" : "Colar mapa"}</Botao>
+              {l.mapa && <Botao pequeno variante="perigo" onClick={() => { if (confirm(`Remover o mapa do concurso ${l.concurso}?`)) acoes.removerMapa(l.concurso); }}>Remover mapa</Botao>}
+            </div>
+          ) },
+        ]} linhas={filtradas.slice(0, limite)} />
+        {filtradas.length > limite && <div style={{ textAlign: "center", marginTop: 10 }}><Botao variante="discreto" pequeno onClick={() => setLimite(limite + 60)}>Mostrar mais ({filtradas.length - limite})</Botao></div>}
+      </Card>
+    </>
+  );
+}
