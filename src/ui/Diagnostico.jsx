@@ -34,20 +34,24 @@ function Calibracao({ cal }) {
 
 export default function Diagnostico({ rel, titulo = "Diagnóstico científico" }) {
   if (!rel) return null;
-  const sinal = rel.zNW > 2 && rel.phaseShift?.p < 0.05 && (rel.ganhoLogloss == null || rel.ganhoLogloss > 0);
+  // "Sinal" só quando os indicadores concordam — inclusive o e-processo, que
+  // é válido mesmo olhando o placar a cada concurso.
+  const sinal = rel.zNW > 2 && rel.phaseShift?.p < 0.05 && (rel.ganhoLogloss == null || rel.ganhoLogloss > 0) && (rel.eAcertos.rejeitaEm != null || rel.eVeross?.rejeitaEm != null);
   return (
     <Card titulo={titulo}>
       <Aviso tom={sinal ? "bom" : "alerta"}>
         {sinal
           ? "Os indicadores concordam: há vantagem estatística sobre o acaso neste replay."
-          : "Os indicadores não mostram vantagem confiável sobre o acaso: z robusto abaixo de 2 e/ou o phase-shift e o AUC em torno do nulo."}
+          : "Os indicadores não mostram vantagem confiável sobre o acaso: z robusto, phase-shift, AUC e e-processos não concordam."}
       </Aviso>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <Metrica rotulo="Δ acertos por concurso" valor={`${rel.delta >= 0 ? "+" : ""}${dec(rel.delta, 3)}`} detalhe={rel.icBootstrap ? `IC95% bootstrap ${dec(rel.icBootstrap[0], 3)} a ${dec(rel.icBootstrap[1], 3)}` : ""} />
         <Metrica rotulo="z robusto (Newey-West)" valor={dec(rel.zNW, 2)} tom={rel.zNW > 2 ? "bom" : undefined} detalhe="> 2 para ser relevante" />
-        {rel.ganhoBrier != null && <Metrica rotulo="Ganho de Brier" valor={`${dec(rel.ganhoBrier * 100, 3)}%`} tom={sinal ? "bom" : undefined} detalhe="sobre o nulo (0,24)" />}
-        {rel.ganhoLogloss != null && <Metrica rotulo="Ganho de log-loss" valor={dec(rel.ganhoLogloss * 1000, 3)} detalhe="milinats por dezena" tom={sinal ? "bom" : undefined} />}
-        {rel.auc != null && <Metrica rotulo="AUC (ranqueamento)" valor={dec(rel.auc, 4)} detalhe={`recente ${dec(rel.aucRecente, 4)} · 0,5 = acaso`} />}
+        {rel.ganhoBrier != null && <Metrica rotulo="Ganho de Brier" valor={`${dec(rel.ganhoBrier * 100, 3)}%`} tom={sinal ? "bom" : undefined} detalhe={rel.icGanhoBrier ? `IC95% ${dec(rel.icGanhoBrier[0] * 100, 3)}% a ${dec(rel.icGanhoBrier[1] * 100, 3)}%` : "sobre o nulo (0,24)"} />}
+        {rel.ganhoLogloss != null && <Metrica rotulo="Ganho de log-loss" valor={dec(rel.ganhoLogloss * 1000, 3)} detalhe={rel.icGanhoLogloss ? `milinats/dezena · IC95% ${dec(rel.icGanhoLogloss[0] * 1000, 3)} a ${dec(rel.icGanhoLogloss[1] * 1000, 3)}` : "milinats por dezena"} tom={sinal ? "bom" : undefined} />}
+        {rel.auc != null && <Metrica rotulo="AUC (ranqueamento)" valor={dec(rel.auc, 4)} detalhe={`${rel.icAuc ? `IC95% ${dec(rel.icAuc[0], 3)}–${dec(rel.icAuc[1], 3)} · ` : ""}recente ${dec(rel.aucRecente, 4)} · 0,5 = acaso`} />}
+        <Metrica rotulo="E-processo (acertos)" valor={dec(rel.eAcertos.e, 2)} detalhe={`máximo ${dec(rel.eAcertos.max, 1)} · evidência ≥ 20`} tom={rel.eAcertos.rejeitaEm != null ? "bom" : undefined} />
+        {rel.eVeross && <Metrica rotulo="E-processo (verossimilhança)" valor={rel.eVeross.e < 1000 ? dec(rel.eVeross.e, 2) : rel.eVeross.e.toExponential(1)} detalhe={`máximo ${dec(rel.eVeross.max, 1)} · evidência ≥ 20`} tom={rel.eVeross.rejeitaEm != null ? "bom" : undefined} />}
         {rel.phaseShift && <Metrica rotulo="Phase-shift" valor={`p ${dec(rel.phaseShift.p, 3)}`} detalhe={`vence ${pct(rel.phaseShift.vitorias)} dos desalinhados`} tom={rel.phaseShift.p < 0.05 ? "bom" : undefined} />}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
@@ -61,6 +65,7 @@ export default function Diagnostico({ rel, titulo = "Diagnóstico científico" }
             { __id: 3, nome: "Pior quartil", valor: dec(rel.piorQuartil, 3) },
             ...rel.janelas.map(j => ({ __id: `j${j.tamanho}`, nome: `Janela móvel de ${j.tamanho}: pior | melhor`, valor: `${dec(j.pior, 2)} | ${dec(j.melhor, 2)} (${pct(j.taxaPositiva)} positivas)` })),
             { __id: 4, nome: "Máximo drawdown acumulado", valor: `${dec(rel.drawdown, 0)} acertos` },
+            { __id: 41, nome: "Alarmes de drift (Page-Hinkley)", valor: rel.drift.alarmes ? `${rel.drift.alarmes} · último: ${rel.drift.ultimo.direcao} no ${rel.drift.ultimo.concurso}` : "nenhum" },
             { __id: 5, nome: "Concursos com Δ > 0 / Δ ≥ 0", valor: `${pct(rel.taxaDeltaPositivo)} / ${pct(rel.taxaDeltaNaoNegativo)}` },
             { __id: 6, nome: "Melhor / pior resultado", valor: `${rel.melhor} / ${rel.pior}` },
             ...(rel.calibracao ? [

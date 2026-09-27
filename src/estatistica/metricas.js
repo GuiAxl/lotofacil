@@ -5,6 +5,7 @@
 // ANTES do sorteio. Todas as comparações são contra o modelo nulo (60% para
 // cada dezena, 9 acertos esperados).
 import { rng } from "./matematica.js";
+import { eProcessoAcertos, eProcessoVerossimilhanca, pageHinkley } from "../auditoria/evidencia.js";
 
 const P0 = 0.6;
 const media = a => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN);
@@ -149,16 +150,24 @@ export function relatorio(registros, opcoes = {}) {
     ...drawdownMaximo(deltas),
   };
   if (temProbs) {
-    const br = media(registros.map(r => brier(r.probs, r.sorteio)));
-    const ll = media(registros.map(r => logloss(r.probs, r.sorteio)));
+    const brs = registros.map(r => brier(r.probs, r.sorteio)), lls = registros.map(r => logloss(r.probs, r.sorteio));
+    const br = media(brs), ll = media(lls);
     const aucs = registros.map(r => auc(r.probs, r.sorteio));
+    const ic = serie => bootstrapBlocos(serie, opcoes);
+    const icBrier = ic(brs.map(b => 1 - b / BRIER_NULO)), icLog = ic(lls.map(l => LOGLOSS_NULO - l)), icAuc = ic(aucs);
     Object.assign(out, {
-      brier: br, ganhoBrier: 1 - br / BRIER_NULO,
-      logloss: ll, ganhoLogloss: LOGLOSS_NULO - ll,
+      brier: br, ganhoBrier: 1 - br / BRIER_NULO, icGanhoBrier: icBrier,
+      logloss: ll, ganhoLogloss: LOGLOSS_NULO - ll, icGanhoLogloss: icLog, icAuc,
       auc: media(aucs), aucRecente: media(aucs.slice(-100)), aucMediana: [...aucs].sort((a, b) => a - b)[Math.floor(n / 2)],
       calibracao: calibracao(registros),
     });
   }
+  // Evidência sequencial (válida a qualquer momento) e drift.
+  const ea = eProcessoAcertos(registros.map(r => r.acertos));
+  out.eAcertos = { e: ea.e, max: ea.max, rejeitaEm: ea.rejeitaEm };
+  if (temProbs) { const ev = eProcessoVerossimilhanca(registros); out.eVeross = { e: ev.e, max: ev.maxE, rejeitaEm: ev.rejeitaEm }; }
+  const alarmes = pageHinkley(deltas);
+  out.drift = { alarmes: alarmes.length, ultimo: alarmes.length ? { ...alarmes[alarmes.length - 1], concurso: registros[alarmes[alarmes.length - 1].indice].concurso } : null };
   if (registros.every(r => r.jogo)) out.phaseShift = phaseShift(registros.map(r => r.jogo), registros.map(r => r.sorteio));
   return out;
 }

@@ -15,10 +15,13 @@ import AbaLaboratorio from "./ui/AbaLaboratorio.jsx";
 import AbaPlacar from "./ui/AbaPlacar.jsx";
 import AbaBackup from "./ui/AbaBackup.jsx";
 import AbaQuantico from "./ui/AbaQuantico.jsx";
+import AbaAuditoria from "./ui/AbaAuditoria.jsx";
+import { hashHistorico } from "./auditoria/integridade.js";
+import { VERSAO, VERSAO_MOTORES } from "./versao.js";
 
 const ABAS = [
   ["concurso", "Concurso"], ["historico", "Histórico"], ["sinais", "Sinais"],
-  ["laboratorio", "Laboratório"], ["placar", "Placar"], ["quantico", "Quântico ⚛"], ["backup", "Backup"],
+  ["laboratorio", "Laboratório"], ["placar", "Placar"], ["quantico", "Quântico ⚛"], ["auditoria", "Auditoria"], ["backup", "Backup"],
 ];
 
 export default function App() {
@@ -45,6 +48,7 @@ export default function App() {
   // automaticamente todo o aprendizado, o placar e o diário.
   const resultadosEfetivos = useMemo(() => (app ? aplicarCorrecoes(app.resultados, app.correcoes) : []), [app?.resultados, app?.correcoes]);
   const appEfetivo = useMemo(() => (app ? { ...app, resultados: resultadosEfetivos } : null), [app, resultadosEfetivos]);
+  const hashHist = useMemo(() => hashHistorico(resultadosEfetivos), [resultadosEfetivos]);
   const { concursos, meta } = useMemo(() => (appEfetivo ? montarConcursos(appEfetivo) : { concursos: [], meta: new Map() }), [resultadosEfetivos, app?.mapas, app?.config]);
 
   // Simulação honesta completa, recalculada quando os dados mudam.
@@ -61,6 +65,8 @@ export default function App() {
   if (!app) return <div style={{ background: T.bg, minHeight: "100vh", color: T.textSoft, padding: 40, fontFamily: T.sans }}>Carregando…</div>;
 
   const atualizar = f => setApp(a => ({ ...a, ...f(a) }));
+  // Manifesto de reprodutibilidade anexado a cada previsão arquivada.
+  const manifesto = motor => ({ versao: VERSAO, motor: VERSAO_MOTORES[motor === "quantico" ? "quantico" : "astral"], hashHistorico: hashHist, nResultados: resultadosEfetivos.length, nMapas: concursos.filter(c => c.chaves).length, config: app.config });
   const acoes = {
     salvarMapa: (concurso, texto, data) => atualizar(a => ({ mapas: { ...a.mapas, [concurso]: { texto, data, salvoEm: new Date().toISOString() } } })),
     removerMapa: concurso => atualizar(a => { const m = { ...a.mapas }; delete m[concurso]; return { mapas: m }; }),
@@ -70,23 +76,24 @@ export default function App() {
       return { mapas: m };
     }),
     salvarResultado: (concurso, data, resultado) => atualizar(a => ({
-      resultados: [...a.resultados.filter(r => r.concurso !== concurso), { concurso, data, resultado }].sort((x, y) => x.concurso - y.concurso),
+      resultados: [...a.resultados.filter(r => r.concurso !== concurso), { concurso, data, resultado, adicionadoEm: new Date().toISOString() }].sort((x, y) => x.concurso - y.concurso),
     })),
     criarHipotese: async dados => { const h = await criarHipotese(dados); atualizar(a => ({ hipoteses: [...a.hipoteses, h] })); },
     removerHipotese: id => atualizar(a => ({ hipoteses: a.hipoteses.filter(h => h.id !== id) })),
     // Arquivo de previsões: a primeira previsão de cada concurso por motor
     // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
-      const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null })));
+      const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null, manifesto: manifesto(m) })));
       atualizar(a => ({ diario: [...a.diario, ...registros.filter(r => !a.diario.some(d => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
     registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
-      const r = await registrarNoDiario({ concurso, motor, jogo, probs });
+      const r = await registrarNoDiario({ concurso, motor, jogo, probs, manifesto: manifesto(motor) });
       atualizar(a => (a.diario.some(d => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] }));
     },
     corrigirResultado: (concurso, resultado, motivo) => atualizar(a => ({
       correcoes: { ...a.correcoes, [concurso]: { resultado, motivo, em: new Date().toISOString(), original: a.resultados.find(r => r.concurso === concurso)?.resultado || null } },
     })),
+    salvarAutoteste: r => atualizar(() => ({ autoteste: r })),
     removerCorrecao: concurso => atualizar(a => { const c = { ...a.correcoes }; delete c[concurso]; return { correcoes: c }; }),
     config: parcial => atualizar(a => ({ config: { ...a.config, ...parcial } })),
     substituirTudo: novo => setApp(novo),
@@ -95,7 +102,7 @@ export default function App() {
 
   const nMapas = concursos.filter(c => c.chaves).length;
   const pesoAstral = simulacao?.trilha.at(-1)?.pesoAstral;
-  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando };
+  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando, hashHist };
 
   return (
     <div style={{ background: `radial-gradient(1200px 600px at 20% -10%, #1A2140 0%, ${T.bg} 55%)`, minHeight: "100vh", color: T.text, fontFamily: T.sans }}>
@@ -123,6 +130,7 @@ export default function App() {
         {aba === "laboratorio" && <AbaLaboratorio {...props} />}
         {aba === "placar" && <AbaPlacar {...props} />}
         {aba === "quantico" && <AbaQuantico {...props} />}
+        {aba === "auditoria" && <AbaAuditoria {...props} />}
         {aba === "backup" && <AbaBackup {...props} />}
       </div>
     </div>

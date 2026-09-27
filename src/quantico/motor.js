@@ -255,13 +255,39 @@ export function registrar(estado, dezenas, X = caracteristicas(estado)) {
   estado.t++;
 }
 
+// Baselines permanentes, calculados no mesmo replay e com o mesmo passado.
+export const BASELINES = {
+  aleatorio: "Aleatório",
+  frequencia: "Frequência simples (histórico todo)",
+  bayes: "Bayes simples (Beta, últimos 200)",
+  markov: "Markov simples (ordem 1)",
+};
+function jogosBaseline(estado, i) {
+  const r = rng(i + 1);
+  const out = { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15) };
+  const freq = new Array(26).fill(0), bayes = new Array(26).fill(0), markov = new Array(26).fill(0);
+  const h = estado.historico, ini = Math.max(0, h.length - 200), ult = h[h.length - 1];
+  for (let n = 1; n <= 25; n++) {
+    freq[n] = estado.t ? estado.cont[n] / estado.t : 0.6;
+    let c = 0;
+    for (let k = ini; k < h.length; k++) if (h[k].has(n)) c++;
+    bayes[n] = (c + 30 * 0.6) / (h.length - ini + 30);
+    const tr = ult ? estado.trans1[n][ult.has(n) ? 1 : 0] : [0, 0];
+    markov[n] = (tr[1] + 20 * 0.6) / (tr[0] + 20);
+  }
+  out.frequencia = top15(freq); out.bayes = top15(bayes); out.markov = top15(markov);
+  return out;
+}
+
 // Replay cronológico test-then-learn: prevê cada concurso só com o passado,
 // guarda a previsão e depois aprende com o resultado.
 export function simular(sorteios, opcoes = {}) {
-  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true } = opcoes;
+  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, janelaRedundancia = 800 } = opcoes;
   const estado = criarEstado(familiasAtivas);
   const acertos = [], pontos = [], registros = [];
-  let perdaMistura = 0, perdaNula = 0, n = 0;
+  const acertosBaseline = Object.fromEntries(Object.keys(BASELINES).map(b => [b, []]));
+  const desvioFamilia = {}; // família → desvios (p − 60%) por dezena nos últimos concursos, para redundância
+  let perdaMistura = 0, perdaNula = 0, n = 0, penultimaPrevisao = null;
   sorteios.forEach((dezenas, i) => {
     const X = caracteristicas(estado);
     if (i >= aquecimento) {
@@ -273,11 +299,69 @@ export function simular(sorteios, opcoes = {}) {
       perdaNula += perdaLog(new Array(26).fill(0.6), s);
       n++;
       if (guardarRegistros) registros.push({ concurso: concursos ? concursos[i] : i + 1, probs: prev.probs, sorteio: dezenas, jogo: prev.jogo, acertos: a });
+      if (baselines) {
+        const jb = jogosBaseline(estado, i);
+        for (const b of Object.keys(BASELINES)) acertosBaseline[b].push(jb[b].filter(x => s.has(x)).length);
+      }
+      if (guardarRegistros && i >= sorteios.length - janelaRedundancia) {
+        for (const m of estado.modelos) {
+          if (m.nulo) continue;
+          const pm = probsModelo(m, X);
+          const arr = (desvioFamilia[`${m.familia}|${m.lr}`] ||= []);
+          for (let k = 1; k <= 25; k++) arr.push(pm[k] - 0.6);
+        }
+      }
+      if (i === sorteios.length - 1) penultimaPrevisao = prev;
       if (i % 20 === 0) pontos.push({ rotulo: concursos ? concursos[i] : i + 1, valor: prev.confianca, familias: prev.familias });
     }
     registrar(estado, dezenas, X);
   });
-  return { acertos, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
+  return { acertos, acertosBaseline, desvioFamilia, penultimaPrevisao, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
+}
+
+// Redundância: correlação entre as previsões (desvio de 60%) das famílias.
+// Famílias muito correlacionadas dizem a mesma coisa.
+export function redundanciaFamilias(res) {
+  const porFamilia = {};
+  for (const [k, v] of Object.entries(res.desvioFamilia)) {
+    const f = k.split("|")[0];
+    if (!porFamilia[f] || k.endsWith("|0.02")) porFamilia[f] = v; // usa o aprendiz mais rápido
+  }
+  const fams = Object.keys(porFamilia);
+  const corr = (a, b) => {
+    const n = Math.min(a.length, b.length);
+    let ma = 0, mb = 0;
+    for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+    ma /= n; mb /= n;
+    let sab = 0, saa = 0, sbb = 0;
+    for (let i = 0; i < n; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
+    return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0;
+  };
+  return { familias: fams, matriz: fams.map(a => fams.map(b => corr(porFamilia[a], porFamilia[b]))) };
+}
+
+// O que mudou entre a previsão do último concurso e a do próximo.
+export function resumoMudancas(res) {
+  const antes = res.penultimaPrevisao, depois = prever(res.estado);
+  if (!antes) return null;
+  const familias = FAMILIAS.map(f => ({ familia: f.id, antes: antes.familias[f.id] || 0, depois: depois.familias[f.id] || 0 }))
+    .map(f => ({ ...f, delta: f.depois - f.antes })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return {
+    entraram: depois.jogo.filter(n => !antes.jogo.includes(n)),
+    sairam: antes.jogo.filter(n => !depois.jogo.includes(n)),
+    confiancaAntes: antes.confianca, confiancaDepois: depois.confianca,
+    familias,
+    maioresMudancas: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, delta: depois.probs[i + 1] - antes.probs[i + 1] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5),
+  };
+}
+
+// Por que uma dezena entrou (ou ficou fora) do jogo: distância até o corte
+// entre a 15ª e a 16ª posição e as famílias que mais pesaram.
+export function explicarEscolha(previsao, n) {
+  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
+  const posicao = ordem.indexOf(n) + 1;
+  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
+  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter(f => f.familia !== "nulo").slice(0, 3) };
 }
 
 // Teste de padrão temporal: embaralha a ORDEM dos sorteios (destrói memória,

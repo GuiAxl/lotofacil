@@ -4,7 +4,7 @@ import { T, Card, Botao, Chip, Rotulo, Bolinhas, BarrasProbabilidade, Tabela, Av
 import { parseNumeros, pct, dec, formatarNum, estimarProximo } from "./estado.js";
 import { HISTORICO } from "../dados/historico.js";
 import { gerarLaudo } from "../quantico/laudo.js";
-import { simular, prever, testeTemporal, scannerAblacao, governanca, contrafactual, explicarDezena, FAMILIAS, FAMILIAS_SINAL } from "../quantico/motor.js";
+import { simular, prever, testeTemporal, scannerAblacao, governanca, contrafactual, explicarDezena, explicarEscolha, redundanciaFamilias, resumoMudancas, FAMILIAS, FAMILIAS_SINAL, BASELINES } from "../quantico/motor.js";
 import { ajustarPopularidade, avaliarPopularidade, premioEsperado } from "../quantico/popularidade.js";
 import { gerarJogos, retornoEsperado, simularConjunto, fechamento } from "../quantico/otimizador.js";
 import { media } from "../estatistica/matematica.js";
@@ -109,6 +109,8 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   useEffect(() => { setBase(null); setConfig(null); const t = setTimeout(() => setBase(simular(sorteios, { concursos })), 50); return () => clearTimeout(t); }, [sorteios]);
   const atual = config || base;
   const rel = useMemo(() => (atual ? relatorio(atual.registros) : null), [atual]);
+  const redundancia = useMemo(() => (atual ? redundanciaFamilias(atual) : null), [atual]);
+  const mudancas = useMemo(() => (atual ? resumoMudancas(atual) : null), [atual]);
   if (!atual) return <Card><div style={{ color: T.textSoft }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
 
   const prox = prever(atual.estado);
@@ -179,13 +181,68 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
         <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: pior que o acaso.</div>
       </Card>
 
+      <Card titulo="Comparação com baselines permanentes">
+        <Tabela colunas={[
+          { id: "nome", titulo: "Método" },
+          { id: "media", titulo: "Acertos médios", alinhar: "right", mono: true, render: l => dec(l.media, 4) },
+          { id: "rec", titulo: "Últimos 500", alinhar: "right", mono: true, render: l => dec(l.recentes, 3) },
+          { id: "dif", titulo: "Quântico − método", alinhar: "right", mono: true, render: l => (l.id === "quantico" ? "—" : `${l.dif >= 0 ? "+" : ""}${dec(l.dif, 4)}`) },
+          { id: "z", titulo: "z (pareado)", alinhar: "right", mono: true, render: l => (l.id === "quantico" ? "—" : dec(l.z, 2)) },
+        ]} linhas={[{ id: "quantico", nome: "Quântico (mistura)", xs: atual.acertos }, ...Object.entries(BASELINES).map(([id, nome]) => ({ id, nome, xs: atual.acertosBaseline[id] }))].map(l => {
+          const d = atual.acertos.map((a, i) => a - l.xs[i]), md = media(d);
+          const sd = Math.sqrt(d.reduce((s2, v) => s2 + (v - md) ** 2, 0) / Math.max(1, d.length - 1));
+          return { ...l, __id: l.id, media: media(l.xs), recentes: media(l.xs.slice(-500)), dif: md, z: sd ? md / (sd / Math.sqrt(d.length)) : 0 };
+        })} />
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Todos avaliados no mesmo replay, concurso a concurso, com o mesmo passado. z pareado &gt; 2 indicaria que o Quântico supera o método.</div>
+      </Card>
+
+      {mudancas && (
+        <Card titulo={`O que mudou desde o concurso ${concursos[concursos.length - 1]}`}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <Metrica rotulo="Confiança" valor={`${pct(mudancas.confiancaAntes)} → ${pct(mudancas.confiancaDepois)}`} />
+            <Metrica rotulo="Entraram no jogo" valor={mudancas.entraram.length ? mudancas.entraram.map(formatarNum).join(" ") : "—"} />
+            <Metrica rotulo="Saíram do jogo" valor={mudancas.sairam.length ? mudancas.sairam.map(formatarNum).join(" ") : "—"} />
+          </div>
+          <div style={{ fontSize: 13, color: T.textSoft }}>
+            Famílias que mais mudaram de peso: {mudancas.familias.filter(f => f.familia !== "nulo").slice(0, 3).map(f => `${nomeFamilia(f.familia)} (${f.delta >= 0 ? "+" : ""}${dec(f.delta * 100, 2)} p.p.)`).join(" · ")}.
+            {" "}Dezenas que mais mudaram de probabilidade: {mudancas.maioresMudancas.map(m => `${formatarNum(m.numero)} (${m.delta >= 0 ? "+" : ""}${dec(m.delta * 100, 3)} p.p.)`).join(" · ")}.
+          </div>
+        </Card>
+      )}
+
       <Diagnostico rel={rel} titulo="Diagnóstico científico · Quântico" />
+
+      {redundancia && (
+        <Card titulo="Redundância entre famílias">
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ display: "grid", gridTemplateColumns: `minmax(120px, 160px) repeat(${redundancia.familias.length}, minmax(34px, 1fr))`, gap: 2, fontSize: 11, minWidth: 480 }}>
+              <div />
+              {redundancia.familias.map(f => <div key={f} title={nomeFamilia(f)} style={{ textAlign: "center", color: T.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.slice(0, 5)}</div>)}
+              {redundancia.familias.map((f, i) => [
+                <div key={f} style={{ color: T.textSoft, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nomeFamilia(f)}</div>,
+                ...redundancia.matriz[i].map((c, j) => <div key={`${i}${j}`} title={`${nomeFamilia(f)} × ${nomeFamilia(redundancia.familias[j])}: correlação ${dec(c, 2)}`} style={{ height: 22, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.mono, fontSize: 10, color: T.text, background: c >= 0 ? T.serie2 : T.serie1, opacity: i === j ? 0.25 : 0.15 + Math.min(1, Math.abs(c)) * 0.85 }}>{i === j ? "" : dec(c, 1)}</div>),
+              ])}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>
+            Correlação entre o que as famílias preveem (últimos 800 concursos). Acima de 0,7 = dizem praticamente a mesma coisa.
+            {(() => { const pares = []; redundancia.familias.forEach((a, i) => redundancia.familias.forEach((b, j) => { if (j > i && b !== "todos" && a !== "todos" && redundancia.matriz[i][j] > 0.7) pares.push(`${nomeFamilia(a)} ~ ${nomeFamilia(b)}`); })); return pares.length ? ` Redundantes: ${pares.join("; ")}.` : ""; })()}
+          </div>
+        </Card>
+      )}
 
       <Card titulo="Mapa de evidências por dezena">
         <MapaEvidencias previsao={prox} selecionada={dezena} onSelecionar={setDezena} />
         {dezena && (
           <div style={{ marginTop: 14 }}>
             <Rotulo>Nº {formatarNum(dezena)} · probabilidade {pct(prox.probs[dezena], 2)}</Rotulo>
+            {(() => { const e = explicarEscolha(prox, dezena); return (
+              <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>
+                {e.entrou ? "Entrou no jogo" : "Ficou fora do jogo"}: {e.posicao}ª posição, {e.margem >= 0 ? "acima" : "abaixo"} do corte (entre a 15ª e a 16ª) por {dec(Math.abs(e.margem) * 100, 4)} p.p.
+                {e.familias.length ? ` Quem mais pesou: ${e.familias.map(f => `${nomeFamilia(f.familia)} (${f.contribuicao >= 0 ? "+" : ""}${dec(f.contribuicao * 100, 4)})`).join(", ")}.` : ""}
+                {Math.abs(e.margem) < 0.002 ? " A margem é minúscula: na prática, empate com as vizinhas." : ""}
+              </div>
+            ); })()}
             <Tabela colunas={[
               { id: "familia", titulo: "Família", render: l => nomeFamilia(l.familia) },
               { id: "peso", titulo: "Peso", alinhar: "right", mono: true, render: l => pct(l.peso, 1) },
@@ -303,7 +360,7 @@ function Popularidade({ modelo, ultimo }) {
 }
 
 function Gerador({ modelo, ultimo, previsaoMotor }) {
-  const [cfg, setCfg] = useState({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false });
+  const [cfg, setCfg] = useState({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "" });
   const [res, setRes] = useState(null);
   const [rodando, setRodando] = useState(false);
   const preco = Number(cfg.preco.replace(",", ".")) || 3.5;
@@ -311,13 +368,16 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
     setRodando(true);
     setTimeout(() => {
       try {
+        // Seed registrado: a mesma seed + mesma configuração + mesmo histórico = mesmos jogos.
+        const semente = Number(cfg.semente) || Math.floor(Math.random() * 1e9);
         const jogos = gerarJogos({
+          semente,
           quantidade: Math.min(50, Math.max(1, Number(cfg.quantidade) || 5)), modelo, ultimo,
           fixos: parseNumeros(cfg.fixos), excluidos: parseNumeros(cfg.excluidos), sobreposicaoMax: Number(cfg.sobreposicao) || 10,
           probs: cfg.usarMotor ? previsaoMotor?.probs : null, confianca: cfg.usarMotor ? previsaoMotor?.confianca : 0,
         });
         const avaliados = jogos.map(j => ({ jogo: j, ...retornoEsperado(j, { modelo, ultimo, preco }) }));
-        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null });
+        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente });
       } catch (e) { setRes({ erro: e.message }); }
       setRodando(false);
     }, 30);
@@ -336,6 +396,7 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           <div><Rotulo>Excluídos</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.excluidos} placeholder="ex.: 1 25" onChange={e => setCfg({ ...cfg, excluidos: e.target.value })} /></div>
           <div><Rotulo>Máx. dezenas em comum</Rotulo><input style={estiloInput} value={cfg.sobreposicao} onChange={e => setCfg({ ...cfg, sobreposicao: e.target.value.replace(/\D/g, "") })} /></div>
           <div><Rotulo>Preço da aposta (R$)</Rotulo><input style={estiloInput} value={cfg.preco} onChange={e => setCfg({ ...cfg, preco: e.target.value })} /></div>
+          <div><Rotulo>Seed (vazio = nova)</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.semente} placeholder="aleatória" onChange={e => setCfg({ ...cfg, semente: e.target.value.replace(/\D/g, "") })} /></div>
         </div>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={cfg.usarMotor} onChange={e => setCfg({ ...cfg, usarMotor: e.target.checked })} />
@@ -353,6 +414,23 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
             <Metrica rotulo="Chance de 14+ em algum" valor={pct(res.conjunto.melhor[14] + res.conjunto.melhor[15], 3)} />
           </div>
           <Aviso tom="info">Retorno abaixo de R$ 1,00 por real significa que, na média, a aposta perde dinheiro, como toda loteria. Os jogos gerados perdem menos que um jogo comum porque dividem menos o prêmio quando acertam.</Aviso>
+          <Card titulo="Exposição e sobreposição">
+            <Rotulo>Em quantos jogos cada dezena aparece</Rotulo>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, alignItems: "end", height: 70 }}>
+              {Array.from({ length: 25 }, (_, i) => { const c = res.avaliados.filter(a => a.jogo.includes(i + 1)).length; return <div key={i} title={`nº ${formatarNum(i + 1)}: ${c} de ${res.avaliados.length} jogos`} style={{ height: `${(c / res.avaliados.length) * 100}%`, minHeight: c ? 2 : 0, background: T.serie1, borderRadius: "3px 3px 0 0" }} />; })}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, marginTop: 3 }}>{Array.from({ length: 25 }, (_, i) => <div key={i} style={{ textAlign: "center", fontFamily: T.mono, fontSize: 9.5, color: T.textMuted }}>{formatarNum(i + 1)}</div>)}</div>
+            {res.avaliados.length > 1 && res.avaliados.length <= 12 && (
+              <div style={{ marginTop: 12 }}>
+                <Rotulo>Dezenas em comum entre os jogos</Rotulo>
+                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${res.avaliados.length}, 30px)`, gap: 2, fontSize: 11, fontFamily: T.mono }}>
+                  <div />{res.avaliados.map((_, j) => <div key={j} style={{ textAlign: "center", color: T.textMuted }}>J{j + 1}</div>)}
+                  {res.avaliados.map((a, i) => [<div key={`r${i}`} style={{ color: T.textMuted }}>J{i + 1}</div>, ...res.avaliados.map((b, j) => { const c = a.jogo.filter(n => b.jogo.includes(n)).length; return <div key={`${i}${j}`} style={{ textAlign: "center", padding: "3px 0", borderRadius: 3, background: i === j ? T.surface2 : T.serie2, opacity: i === j ? 0.5 : 0.25 + (c / 15) * 0.75, color: T.text }}>{i === j ? "—" : c}</div>; })])}
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
+          </Card>
           <Card titulo="Jogos">
             {res.avaliados.map((a, i) => (
               <div key={i} style={{ padding: "10px 0", borderTop: i ? `1px solid ${T.borderSoft}` : "none" }}>

@@ -1,6 +1,6 @@
 // Lotofácil Astro v13 — Observatório. Arquivo gerado por scripts/build.mjs a partir de src/.
 // Não edite aqui: edite src/ e rode "npm run build".
-import { useState as useState10, useEffect as useEffect3, useMemo as useMemo7, useRef, useState, useState as useState2, useEffect, useMemo, useState as useState3, useMemo as useMemo2, useState as useState4, useMemo as useMemo3, useState as useState5, useMemo as useMemo4, useState as useState7, useMemo as useMemo5, useState as useState6, useState as useState8, useState as useState9, useMemo as useMemo6, useEffect as useEffect2 } from "react";
+import { useState as useState11, useEffect as useEffect3, useMemo as useMemo8, useRef, useState, useState as useState2, useEffect, useMemo, useState as useState3, useMemo as useMemo2, useState as useState4, useMemo as useMemo3, useState as useState5, useMemo as useMemo4, useState as useState7, useMemo as useMemo5, useState as useState6, useState as useState8, useState as useState9, useMemo as useMemo6, useEffect as useEffect2, useState as useState10, useMemo as useMemo7 } from "react";
 // src/App.jsx
 
 // src/ui/base.jsx
@@ -4364,13 +4364,20 @@ function aplicarCorrecoes(resultados, correcoes = {}) {
 }
 function estimarProximo(resultados) {
   const ultimo = resultados[resultados.length - 1];
-  const m = String(ultimo?.data || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const paraData = (s) => {
+    const m = String(s || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    return m ? new Date(Date.UTC(+m[3], +m[2] - 1, +m[1])) : null;
+  };
+  const dias = new Set(resultados.slice(-30).map((r) => paraData(r.data)?.getUTCDay()).filter((d2) => d2 != null));
+  if (!dias.size) [1, 2, 3, 4, 5, 6].forEach((d2) => dias.add(d2));
   let data = "";
-  if (m) {
-    const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
-    do
+  const d = paraData(ultimo?.data);
+  if (d) {
+    let passos = 0;
+    do {
       d.setUTCDate(d.getUTCDate() + 1);
-    while (d.getUTCDay() === 0);
+      passos++;
+    } while (!dias.has(d.getUTCDay()) && passos < 7);
     data = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
   }
   return { concurso: (ultimo?.concurso || 0) + 1, data };
@@ -4397,7 +4404,7 @@ function mesclarComInicial(salvo) {
   const porConcurso = new Map(base.resultados.map((r) => [r.concurso, r]));
   for (const r of salvo.resultados || []) {
     const c = Number(r.concurso);
-    if (!porConcurso.has(c) && validarResultado(r.resultado)) porConcurso.set(c, { concurso: c, data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b) });
+    if (!porConcurso.has(c) && validarResultado(r.resultado)) porConcurso.set(c, { concurso: c, data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b), ...r.adicionadoEm ? { adicionadoEm: r.adicionadoEm } : {} });
   }
   return {
     ...base,
@@ -5107,12 +5114,13 @@ function avaliarHipotese(h, concursos) {
   const pValor = tentativas ? h.direcao === "mais" ? pBinomialSuperior(acertosN, tentativas) : pBinomialSuperior(tentativas - acertosN, tentativas, 1 - P0) : null;
   return { status, decididaNo, llr, limiteA, limiteB, tentativas, acertos: acertosN, taxa: tentativas ? acertosN / tentativas : null, pValor, concursos: usados };
 }
-async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null }) {
+async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null, manifesto = null }) {
   const base = {
     concurso,
     motor,
     jogo: [...jogo].sort((a, b) => a - b),
     pesoAstral,
+    manifesto,
     probs: probs ? Array.from({ length: 25 }, (_, i) => Math.round(probs[i + 1] * 1e5) / 1e5) : null,
     registradoEm: (/* @__PURE__ */ new Date()).toISOString()
   };
@@ -5738,6 +5746,62 @@ function AbaLaboratorio({ app, concursos, meta, acoes }) {
 
 // src/ui/AbaPlacar.jsx
 
+// src/auditoria/evidencia.js
+var LAMBDAS = [5e-3, 0.01, 0.02, 0.04, 0.08];
+function eProcessoAcertos(acertos2, alfa = 0.05) {
+  const ln = LAMBDAS.map(() => 0);
+  const trajetoria = [];
+  let rejeitaEm = null, max = 1;
+  acertos2.forEach((a, i) => {
+    LAMBDAS.forEach((l, k) => {
+      ln[k] += Math.log(1 + l * (a - 9));
+    });
+    const e = ln.reduce((s, v) => s + Math.exp(v), 0) / LAMBDAS.length;
+    trajetoria.push(e);
+    max = Math.max(max, e);
+    if (rejeitaEm == null && e >= 1 / alfa) rejeitaEm = i;
+  });
+  return { e: trajetoria[trajetoria.length - 1] ?? 1, max, rejeitaEm, trajetoria, limiar: 1 / alfa };
+}
+function eProcessoVerossimilhanca(registros, alfa = 0.05) {
+  let lnE = 0, rejeitaEm = null, maxLn = 0;
+  const trajetoria = [];
+  registros.forEach((r, i) => {
+    const s = new Set(r.sorteio);
+    for (let n = 1; n <= 25; n++) {
+      const q = Math.min(1 - 1e-9, Math.max(1e-9, r.probs[n]));
+      lnE += s.has(n) ? Math.log(q / 0.6) : Math.log((1 - q) / 0.4);
+    }
+    trajetoria.push(lnE);
+    maxLn = Math.max(maxLn, lnE);
+    if (rejeitaEm == null && lnE >= Math.log(1 / alfa)) rejeitaEm = i;
+  });
+  return { lnE, e: Math.exp(lnE), maxE: Math.exp(maxLn), rejeitaEm, trajetoria, limiar: 1 / alfa };
+}
+function pageHinkley(x, { delta = 0.05, lambda = 60 } = {}) {
+  let media3 = 0, n = 0, mT = 0, minT = 0, maxT = 0, mT2 = 0;
+  const alarmes = [];
+  x.forEach((v, i) => {
+    n++;
+    media3 += (v - media3) / n;
+    mT += v - media3 - delta;
+    minT = Math.min(minT, mT);
+    mT2 += v - media3 + delta;
+    maxT = Math.max(maxT, mT2);
+    if (mT - minT > lambda) {
+      alarmes.push({ indice: i, direcao: "alta" });
+      mT = 0;
+      minT = 0;
+    }
+    if (maxT - mT2 > lambda) {
+      alarmes.push({ indice: i, direcao: "queda" });
+      mT2 = 0;
+      maxT = 0;
+    }
+  });
+  return alarmes;
+}
+
 // src/estatistica/metricas.js
 var P02 = 0.6;
 var media2 = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : NaN;
@@ -5895,20 +5959,33 @@ function relatorio(registros, opcoes = {}) {
     ...drawdownMaximo(deltas)
   };
   if (temProbs) {
-    const br = media2(registros.map((r) => brier(r.probs, r.sorteio)));
-    const ll = media2(registros.map((r) => logloss(r.probs, r.sorteio)));
+    const brs = registros.map((r) => brier(r.probs, r.sorteio)), lls = registros.map((r) => logloss(r.probs, r.sorteio));
+    const br = media2(brs), ll = media2(lls);
     const aucs = registros.map((r) => auc(r.probs, r.sorteio));
+    const ic = (serie) => bootstrapBlocos(serie, opcoes);
+    const icBrier = ic(brs.map((b) => 1 - b / BRIER_NULO)), icLog = ic(lls.map((l) => LOGLOSS_NULO - l)), icAuc = ic(aucs);
     Object.assign(out, {
       brier: br,
       ganhoBrier: 1 - br / BRIER_NULO,
+      icGanhoBrier: icBrier,
       logloss: ll,
       ganhoLogloss: LOGLOSS_NULO - ll,
+      icGanhoLogloss: icLog,
+      icAuc,
       auc: media2(aucs),
       aucRecente: media2(aucs.slice(-100)),
       aucMediana: [...aucs].sort((a, b) => a - b)[Math.floor(n / 2)],
       calibracao: calibracao(registros)
     });
   }
+  const ea = eProcessoAcertos(registros.map((r) => r.acertos));
+  out.eAcertos = { e: ea.e, max: ea.max, rejeitaEm: ea.rejeitaEm };
+  if (temProbs) {
+    const ev = eProcessoVerossimilhanca(registros);
+    out.eVeross = { e: ev.e, max: ev.maxE, rejeitaEm: ev.rejeitaEm };
+  }
+  const alarmes = pageHinkley(deltas);
+  out.drift = { alarmes: alarmes.length, ultimo: alarmes.length ? { ...alarmes[alarmes.length - 1], concurso: registros[alarmes[alarmes.length - 1].indice].concurso } : null };
   if (registros.every((r) => r.jogo)) out.phaseShift = phaseShift(registros.map((r) => r.jogo), registros.map((r) => r.sorteio));
   return out;
 }
@@ -5942,17 +6019,19 @@ function Calibracao({ cal }) {
 }
 function Diagnostico({ rel, titulo = "Diagnóstico científico" }) {
   if (!rel) return null;
-  const sinal = rel.zNW > 2 && rel.phaseShift?.p < 0.05 && (rel.ganhoLogloss == null || rel.ganhoLogloss > 0);
+  const sinal = rel.zNW > 2 && rel.phaseShift?.p < 0.05 && (rel.ganhoLogloss == null || rel.ganhoLogloss > 0) && (rel.eAcertos.rejeitaEm != null || rel.eVeross?.rejeitaEm != null);
   return <Card titulo={titulo}>
       <Aviso tom={sinal ? "bom" : "alerta"}>
-        {sinal ? "Os indicadores concordam: há vantagem estatística sobre o acaso neste replay." : "Os indicadores não mostram vantagem confiável sobre o acaso: z robusto abaixo de 2 e/ou o phase-shift e o AUC em torno do nulo."}
+        {sinal ? "Os indicadores concordam: há vantagem estatística sobre o acaso neste replay." : "Os indicadores não mostram vantagem confiável sobre o acaso: z robusto, phase-shift, AUC e e-processos não concordam."}
       </Aviso>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <Metrica rotulo="Δ acertos por concurso" valor={`${rel.delta >= 0 ? "+" : ""}${dec(rel.delta, 3)}`} detalhe={rel.icBootstrap ? `IC95% bootstrap ${dec(rel.icBootstrap[0], 3)} a ${dec(rel.icBootstrap[1], 3)}` : ""} />
         <Metrica rotulo="z robusto (Newey-West)" valor={dec(rel.zNW, 2)} tom={rel.zNW > 2 ? "bom" : void 0} detalhe="> 2 para ser relevante" />
-        {rel.ganhoBrier != null && <Metrica rotulo="Ganho de Brier" valor={`${dec(rel.ganhoBrier * 100, 3)}%`} tom={sinal ? "bom" : void 0} detalhe="sobre o nulo (0,24)" />}
-        {rel.ganhoLogloss != null && <Metrica rotulo="Ganho de log-loss" valor={dec(rel.ganhoLogloss * 1e3, 3)} detalhe="milinats por dezena" tom={sinal ? "bom" : void 0} />}
-        {rel.auc != null && <Metrica rotulo="AUC (ranqueamento)" valor={dec(rel.auc, 4)} detalhe={`recente ${dec(rel.aucRecente, 4)} · 0,5 = acaso`} />}
+        {rel.ganhoBrier != null && <Metrica rotulo="Ganho de Brier" valor={`${dec(rel.ganhoBrier * 100, 3)}%`} tom={sinal ? "bom" : void 0} detalhe={rel.icGanhoBrier ? `IC95% ${dec(rel.icGanhoBrier[0] * 100, 3)}% a ${dec(rel.icGanhoBrier[1] * 100, 3)}%` : "sobre o nulo (0,24)"} />}
+        {rel.ganhoLogloss != null && <Metrica rotulo="Ganho de log-loss" valor={dec(rel.ganhoLogloss * 1e3, 3)} detalhe={rel.icGanhoLogloss ? `milinats/dezena · IC95% ${dec(rel.icGanhoLogloss[0] * 1e3, 3)} a ${dec(rel.icGanhoLogloss[1] * 1e3, 3)}` : "milinats por dezena"} tom={sinal ? "bom" : void 0} />}
+        {rel.auc != null && <Metrica rotulo="AUC (ranqueamento)" valor={dec(rel.auc, 4)} detalhe={`${rel.icAuc ? `IC95% ${dec(rel.icAuc[0], 3)}–${dec(rel.icAuc[1], 3)} · ` : ""}recente ${dec(rel.aucRecente, 4)} · 0,5 = acaso`} />}
+        <Metrica rotulo="E-processo (acertos)" valor={dec(rel.eAcertos.e, 2)} detalhe={`máximo ${dec(rel.eAcertos.max, 1)} · evidência ≥ 20`} tom={rel.eAcertos.rejeitaEm != null ? "bom" : void 0} />
+        {rel.eVeross && <Metrica rotulo="E-processo (verossimilhança)" valor={rel.eVeross.e < 1e3 ? dec(rel.eVeross.e, 2) : rel.eVeross.e.toExponential(1)} detalhe={`máximo ${dec(rel.eVeross.max, 1)} · evidência ≥ 20`} tom={rel.eVeross.rejeitaEm != null ? "bom" : void 0} />}
         {rel.phaseShift && <Metrica rotulo="Phase-shift" valor={`p ${dec(rel.phaseShift.p, 3)}`} detalhe={`vence ${pct(rel.phaseShift.vitorias)} dos desalinhados`} tom={rel.phaseShift.p < 0.05 ? "bom" : void 0} />}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
@@ -5966,6 +6045,7 @@ function Diagnostico({ rel, titulo = "Diagnóstico científico" }) {
     { __id: 3, nome: "Pior quartil", valor: dec(rel.piorQuartil, 3) },
     ...rel.janelas.map((j) => ({ __id: `j${j.tamanho}`, nome: `Janela móvel de ${j.tamanho}: pior | melhor`, valor: `${dec(j.pior, 2)} | ${dec(j.melhor, 2)} (${pct(j.taxaPositiva)} positivas)` })),
     { __id: 4, nome: "Máximo drawdown acumulado", valor: `${dec(rel.drawdown, 0)} acertos` },
+    { __id: 41, nome: "Alarmes de drift (Page-Hinkley)", valor: rel.drift.alarmes ? `${rel.drift.alarmes} · último: ${rel.drift.ultimo.direcao} no ${rel.drift.ultimo.concurso}` : "nenhum" },
     { __id: 5, nome: "Concursos com Δ > 0 / Δ ≥ 0", valor: `${pct(rel.taxaDeltaPositivo)} / ${pct(rel.taxaDeltaNaoNegativo)}` },
     { __id: 6, nome: "Melhor / pior resultado", valor: `${rel.melhor} / ${rel.pior}` },
     ...rel.calibracao ? [
@@ -6081,7 +6161,7 @@ function AbaBackup({ app, acoes }) {
   const [texto, setTexto] = useState8("");
   const [msg, setMsg] = useState8(null);
   const exportado = JSON.stringify(app);
-  const baixar = () => {
+  const baixar2 = () => {
     try {
       const url = URL.createObjectURL(new Blob([exportado], { type: "application/json" }));
       const a = document.createElement("a");
@@ -6117,7 +6197,7 @@ function AbaBackup({ app, acoes }) {
       <Card titulo="Exportar">
         <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Tudo: resultados, mapas, hipóteses e diário. Guarde uma cópia depois de importar muitos mapas.</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Botao onClick={baixar}>Baixar .json</Botao>
+          <Botao onClick={baixar2}>Baixar .json</Botao>
           <Botao variante="secundario" onClick={copiar}>Copiar</Botao>
         </div>
         <textarea readOnly rows={4} value={exportado} style={{ ...estiloInput, fontFamily: T.mono, fontSize: 11, marginTop: 10 }} />
@@ -6629,11 +6709,37 @@ function registrar2(estado, dezenas, X = caracteristicas(estado)) {
   estado.mascaras.push(dezenas.reduce((m, n) => m | 1 << n - 1, 0));
   estado.t++;
 }
+var BASELINES = {
+  aleatorio: "Aleatório",
+  frequencia: "Frequência simples (histórico todo)",
+  bayes: "Bayes simples (Beta, últimos 200)",
+  markov: "Markov simples (ordem 1)"
+};
+function jogosBaseline(estado, i) {
+  const r = rng(i + 1);
+  const out = { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15) };
+  const freq = new Array(26).fill(0), bayes = new Array(26).fill(0), markov = new Array(26).fill(0);
+  const h = estado.historico, ini = Math.max(0, h.length - 200), ult = h[h.length - 1];
+  for (let n = 1; n <= 25; n++) {
+    freq[n] = estado.t ? estado.cont[n] / estado.t : 0.6;
+    let c = 0;
+    for (let k = ini; k < h.length; k++) if (h[k].has(n)) c++;
+    bayes[n] = (c + 30 * 0.6) / (h.length - ini + 30);
+    const tr = ult ? estado.trans1[n][ult.has(n) ? 1 : 0] : [0, 0];
+    markov[n] = (tr[1] + 20 * 0.6) / (tr[0] + 20);
+  }
+  out.frequencia = top15(freq);
+  out.bayes = top15(bayes);
+  out.markov = top15(markov);
+  return out;
+}
 function simular2(sorteios, opcoes = {}) {
-  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true } = opcoes;
+  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, janelaRedundancia = 800 } = opcoes;
   const estado = criarEstado2(familiasAtivas);
   const acertos2 = [], pontos = [], registros = [];
-  let perdaMistura = 0, perdaNula = 0, n = 0;
+  const acertosBaseline = Object.fromEntries(Object.keys(BASELINES).map((b) => [b, []]));
+  const desvioFamilia = {};
+  let perdaMistura = 0, perdaNula = 0, n = 0, penultimaPrevisao = null;
   sorteios.forEach((dezenas, i) => {
     const X = caracteristicas(estado);
     if (i >= aquecimento) {
@@ -6645,11 +6751,70 @@ function simular2(sorteios, opcoes = {}) {
       perdaNula += perdaLog2(new Array(26).fill(0.6), s);
       n++;
       if (guardarRegistros) registros.push({ concurso: concursos ? concursos[i] : i + 1, probs: prev.probs, sorteio: dezenas, jogo: prev.jogo, acertos: a });
+      if (baselines) {
+        const jb = jogosBaseline(estado, i);
+        for (const b of Object.keys(BASELINES)) acertosBaseline[b].push(jb[b].filter((x) => s.has(x)).length);
+      }
+      if (guardarRegistros && i >= sorteios.length - janelaRedundancia) {
+        for (const m of estado.modelos) {
+          if (m.nulo) continue;
+          const pm = probsModelo(m, X);
+          const arr = desvioFamilia[`${m.familia}|${m.lr}`] ||= [];
+          for (let k = 1; k <= 25; k++) arr.push(pm[k] - 0.6);
+        }
+      }
+      if (i === sorteios.length - 1) penultimaPrevisao = prev;
       if (i % 20 === 0) pontos.push({ rotulo: concursos ? concursos[i] : i + 1, valor: prev.confianca, familias: prev.familias });
     }
     registrar2(estado, dezenas, X);
   });
-  return { acertos: acertos2, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
+  return { acertos: acertos2, acertosBaseline, desvioFamilia, penultimaPrevisao, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
+}
+function redundanciaFamilias(res) {
+  const porFamilia = {};
+  for (const [k, v] of Object.entries(res.desvioFamilia)) {
+    const f = k.split("|")[0];
+    if (!porFamilia[f] || k.endsWith("|0.02")) porFamilia[f] = v;
+  }
+  const fams = Object.keys(porFamilia);
+  const corr = (a, b) => {
+    const n = Math.min(a.length, b.length);
+    let ma = 0, mb = 0;
+    for (let i = 0; i < n; i++) {
+      ma += a[i];
+      mb += b[i];
+    }
+    ma /= n;
+    mb /= n;
+    let sab = 0, saa = 0, sbb = 0;
+    for (let i = 0; i < n; i++) {
+      const x = a[i] - ma, y = b[i] - mb;
+      sab += x * y;
+      saa += x * x;
+      sbb += y * y;
+    }
+    return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0;
+  };
+  return { familias: fams, matriz: fams.map((a) => fams.map((b) => corr(porFamilia[a], porFamilia[b]))) };
+}
+function resumoMudancas(res) {
+  const antes = res.penultimaPrevisao, depois = prever2(res.estado);
+  if (!antes) return null;
+  const familias = FAMILIAS.map((f) => ({ familia: f.id, antes: antes.familias[f.id] || 0, depois: depois.familias[f.id] || 0 })).map((f) => ({ ...f, delta: f.depois - f.antes })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  return {
+    entraram: depois.jogo.filter((n) => !antes.jogo.includes(n)),
+    sairam: antes.jogo.filter((n) => !depois.jogo.includes(n)),
+    confiancaAntes: antes.confianca,
+    confiancaDepois: depois.confianca,
+    familias,
+    maioresMudancas: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, delta: depois.probs[i + 1] - antes.probs[i + 1] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5)
+  };
+}
+function explicarEscolha(previsao, n) {
+  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
+  const posicao = ordem.indexOf(n) + 1;
+  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
+  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter((f) => f.familia !== "nulo").slice(0, 3) };
 }
 async function testeTemporal(sorteios, opcoes = {}) {
   const { n = 30, semente = 7, onProgresso, aquecimento } = opcoes;
@@ -7097,6 +7262,8 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   }, [sorteios]);
   const atual = config || base;
   const rel = useMemo6(() => atual ? relatorio(atual.registros) : null, [atual]);
+  const redundancia = useMemo6(() => atual ? redundanciaFamilias(atual) : null, [atual]);
+  const mudancas = useMemo6(() => atual ? resumoMudancas(atual) : null, [atual]);
   if (!atual) return <Card><div style={{ color: T.textSoft }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
   const prox = prever2(atual.estado);
   const gov = governanca(atual.estado);
@@ -7179,12 +7346,70 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
         <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: pior que o acaso.</div>
       </Card>
 
+      <Card titulo="Comparação com baselines permanentes">
+        <Tabela colunas={[
+    { id: "nome", titulo: "Método" },
+    { id: "media", titulo: "Acertos médios", alinhar: "right", mono: true, render: (l) => dec(l.media, 4) },
+    { id: "rec", titulo: "Últimos 500", alinhar: "right", mono: true, render: (l) => dec(l.recentes, 3) },
+    { id: "dif", titulo: "Quântico − método", alinhar: "right", mono: true, render: (l) => l.id === "quantico" ? "—" : `${l.dif >= 0 ? "+" : ""}${dec(l.dif, 4)}` },
+    { id: "z", titulo: "z (pareado)", alinhar: "right", mono: true, render: (l) => l.id === "quantico" ? "—" : dec(l.z, 2) }
+  ]} linhas={[{ id: "quantico", nome: "Quântico (mistura)", xs: atual.acertos }, ...Object.entries(BASELINES).map(([id, nome]) => ({ id, nome, xs: atual.acertosBaseline[id] }))].map((l) => {
+    const d = atual.acertos.map((a, i) => a - l.xs[i]), md = media(d);
+    const sd = Math.sqrt(d.reduce((s2, v) => s2 + (v - md) ** 2, 0) / Math.max(1, d.length - 1));
+    return { ...l, __id: l.id, media: media(l.xs), recentes: media(l.xs.slice(-500)), dif: md, z: sd ? md / (sd / Math.sqrt(d.length)) : 0 };
+  })} />
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Todos avaliados no mesmo replay, concurso a concurso, com o mesmo passado. z pareado &gt; 2 indicaria que o Quântico supera o método.</div>
+      </Card>
+
+      {mudancas && <Card titulo={`O que mudou desde o concurso ${concursos[concursos.length - 1]}`}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <Metrica rotulo="Confiança" valor={`${pct(mudancas.confiancaAntes)} → ${pct(mudancas.confiancaDepois)}`} />
+            <Metrica rotulo="Entraram no jogo" valor={mudancas.entraram.length ? mudancas.entraram.map(formatarNum).join(" ") : "—"} />
+            <Metrica rotulo="Saíram do jogo" valor={mudancas.sairam.length ? mudancas.sairam.map(formatarNum).join(" ") : "—"} />
+          </div>
+          <div style={{ fontSize: 13, color: T.textSoft }}>
+            Famílias que mais mudaram de peso: {mudancas.familias.filter((f) => f.familia !== "nulo").slice(0, 3).map((f) => `${nomeFamilia(f.familia)} (${f.delta >= 0 ? "+" : ""}${dec(f.delta * 100, 2)} p.p.)`).join(" · ")}.
+            {" "}Dezenas que mais mudaram de probabilidade: {mudancas.maioresMudancas.map((m) => `${formatarNum(m.numero)} (${m.delta >= 0 ? "+" : ""}${dec(m.delta * 100, 3)} p.p.)`).join(" · ")}.
+          </div>
+        </Card>}
+
       <Diagnostico rel={rel} titulo="Diagnóstico científico · Quântico" />
+
+      {redundancia && <Card titulo="Redundância entre famílias">
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ display: "grid", gridTemplateColumns: `minmax(120px, 160px) repeat(${redundancia.familias.length}, minmax(34px, 1fr))`, gap: 2, fontSize: 11, minWidth: 480 }}>
+              <div />
+              {redundancia.familias.map((f) => <div key={f} title={nomeFamilia(f)} style={{ textAlign: "center", color: T.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.slice(0, 5)}</div>)}
+              {redundancia.familias.map((f, i) => [
+    <div key={f} style={{ color: T.textSoft, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nomeFamilia(f)}</div>,
+    ...redundancia.matriz[i].map((c, j) => <div key={`${i}${j}`} title={`${nomeFamilia(f)} × ${nomeFamilia(redundancia.familias[j])}: correlação ${dec(c, 2)}`} style={{ height: 22, borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: T.mono, fontSize: 10, color: T.text, background: c >= 0 ? T.serie2 : T.serie1, opacity: i === j ? 0.25 : 0.15 + Math.min(1, Math.abs(c)) * 0.85 }}>{i === j ? "" : dec(c, 1)}</div>)
+  ])}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>
+            Correlação entre o que as famílias preveem (últimos 800 concursos). Acima de 0,7 = dizem praticamente a mesma coisa.
+            {(() => {
+    const pares = [];
+    redundancia.familias.forEach((a, i) => redundancia.familias.forEach((b, j) => {
+      if (j > i && b !== "todos" && a !== "todos" && redundancia.matriz[i][j] > 0.7) pares.push(`${nomeFamilia(a)} ~ ${nomeFamilia(b)}`);
+    }));
+    return pares.length ? ` Redundantes: ${pares.join("; ")}.` : "";
+  })()}
+          </div>
+        </Card>}
 
       <Card titulo="Mapa de evidências por dezena">
         <MapaEvidencias previsao={prox} selecionada={dezena} onSelecionar={setDezena} />
         {dezena && <div style={{ marginTop: 14 }}>
             <Rotulo>Nº {formatarNum(dezena)} · probabilidade {pct(prox.probs[dezena], 2)}</Rotulo>
+            {(() => {
+    const e = explicarEscolha(prox, dezena);
+    return <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>
+                {e.entrou ? "Entrou no jogo" : "Ficou fora do jogo"}: {e.posicao}ª posição, {e.margem >= 0 ? "acima" : "abaixo"} do corte (entre a 15ª e a 16ª) por {dec(Math.abs(e.margem) * 100, 4)} p.p.
+                {e.familias.length ? ` Quem mais pesou: ${e.familias.map((f) => `${nomeFamilia(f.familia)} (${f.contribuicao >= 0 ? "+" : ""}${dec(f.contribuicao * 100, 4)})`).join(", ")}.` : ""}
+                {Math.abs(e.margem) < 2e-3 ? " A margem é minúscula: na prática, empate com as vizinhas." : ""}
+              </div>;
+  })()}
             <Tabela colunas={[
     { id: "familia", titulo: "Família", render: (l) => nomeFamilia(l.familia) },
     { id: "peso", titulo: "Peso", alinhar: "right", mono: true, render: (l) => pct(l.peso, 1) },
@@ -7300,7 +7525,7 @@ function Popularidade({ modelo, ultimo }) {
     </>;
 }
 function Gerador({ modelo, ultimo, previsaoMotor }) {
-  const [cfg, setCfg] = useState9({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false });
+  const [cfg, setCfg] = useState9({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "" });
   const [res, setRes] = useState9(null);
   const [rodando, setRodando] = useState9(false);
   const preco = Number(cfg.preco.replace(",", ".")) || 3.5;
@@ -7308,7 +7533,9 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
     setRodando(true);
     setTimeout(() => {
       try {
+        const semente = Number(cfg.semente) || Math.floor(Math.random() * 1e9);
         const jogos = gerarJogos({
+          semente,
           quantidade: Math.min(50, Math.max(1, Number(cfg.quantidade) || 5)),
           modelo,
           ultimo,
@@ -7319,7 +7546,7 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           confianca: cfg.usarMotor ? previsaoMotor?.confianca : 0
         });
         const avaliados = jogos.map((j) => ({ jogo: j, ...retornoEsperado(j, { modelo, ultimo, preco }) }));
-        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null });
+        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente });
       } catch (e) {
         setRes({ erro: e.message });
       }
@@ -7339,6 +7566,7 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           <div><Rotulo>Excluídos</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.excluidos} placeholder="ex.: 1 25" onChange={(e) => setCfg({ ...cfg, excluidos: e.target.value })} /></div>
           <div><Rotulo>Máx. dezenas em comum</Rotulo><input style={estiloInput} value={cfg.sobreposicao} onChange={(e) => setCfg({ ...cfg, sobreposicao: e.target.value.replace(/\D/g, "") })} /></div>
           <div><Rotulo>Preço da aposta (R$)</Rotulo><input style={estiloInput} value={cfg.preco} onChange={(e) => setCfg({ ...cfg, preco: e.target.value })} /></div>
+          <div><Rotulo>Seed (vazio = nova)</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.semente} placeholder="aleatória" onChange={(e) => setCfg({ ...cfg, semente: e.target.value.replace(/\D/g, "") })} /></div>
         </div>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 12, cursor: "pointer" }}>
           <input type="checkbox" checked={cfg.usarMotor} onChange={(e) => setCfg({ ...cfg, usarMotor: e.target.checked })} />
@@ -7355,6 +7583,27 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
             <Metrica rotulo="Chance de 14+ em algum" valor={pct(res.conjunto.melhor[14] + res.conjunto.melhor[15], 3)} />
           </div>
           <Aviso tom="info">Retorno abaixo de R$ 1,00 por real significa que, na média, a aposta perde dinheiro, como toda loteria. Os jogos gerados perdem menos que um jogo comum porque dividem menos o prêmio quando acertam.</Aviso>
+          <Card titulo="Exposição e sobreposição">
+            <Rotulo>Em quantos jogos cada dezena aparece</Rotulo>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, alignItems: "end", height: 70 }}>
+              {Array.from({ length: 25 }, (_, i) => {
+    const c = res.avaliados.filter((a) => a.jogo.includes(i + 1)).length;
+    return <div key={i} title={`nº ${formatarNum(i + 1)}: ${c} de ${res.avaliados.length} jogos`} style={{ height: `${c / res.avaliados.length * 100}%`, minHeight: c ? 2 : 0, background: T.serie1, borderRadius: "3px 3px 0 0" }} />;
+  })}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, marginTop: 3 }}>{Array.from({ length: 25 }, (_, i) => <div key={i} style={{ textAlign: "center", fontFamily: T.mono, fontSize: 9.5, color: T.textMuted }}>{formatarNum(i + 1)}</div>)}</div>
+            {res.avaliados.length > 1 && res.avaliados.length <= 12 && <div style={{ marginTop: 12 }}>
+                <Rotulo>Dezenas em comum entre os jogos</Rotulo>
+                <div style={{ display: "grid", gridTemplateColumns: `28px repeat(${res.avaliados.length}, 30px)`, gap: 2, fontSize: 11, fontFamily: T.mono }}>
+                  <div />{res.avaliados.map((_, j) => <div key={j} style={{ textAlign: "center", color: T.textMuted }}>J{j + 1}</div>)}
+                  {res.avaliados.map((a, i) => [<div key={`r${i}`} style={{ color: T.textMuted }}>J{i + 1}</div>, ...res.avaliados.map((b, j) => {
+    const c = a.jogo.filter((n) => b.jogo.includes(n)).length;
+    return <div key={`${i}${j}`} style={{ textAlign: "center", padding: "3px 0", borderRadius: 3, background: i === j ? T.surface2 : T.serie2, opacity: i === j ? 0.5 : 0.25 + c / 15 * 0.75, color: T.text }}>{i === j ? "—" : c}</div>;
+  })])}
+                </div>
+              </div>}
+            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
+          </Card>
           <Card titulo="Jogos">
             {res.avaliados.map((a, i) => <div key={i} style={{ padding: "10px 0", borderTop: i ? `1px solid ${T.borderSoft}` : "none" }}>
                 <Bolinhas numeros={a.jogo} />
@@ -7454,6 +7703,304 @@ function AbaQuantico({ app, acoes }) {
     </>;
 }
 
+// src/ui/AbaAuditoria.jsx
+
+// src/auditoria/integridade.js
+function hash53(texto, semente = 0) {
+  let h1 = 3735928559 ^ semente, h2 = 1103547991 ^ semente;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ h1 >>> 16, 2246822507) ^ Math.imul(h2 ^ h2 >>> 13, 3266489909);
+  h2 = Math.imul(h2 ^ h2 >>> 16, 2246822507) ^ Math.imul(h1 ^ h1 >>> 13, 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36).padStart(11, "0");
+}
+var hashHistorico = (resultados) => hash53(resultados.map((r) => `${r.concurso}:${r.resultado.join(",")}`).join("|"));
+var dataISO = (d) => {
+  const m = String(d || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+};
+function verificarHistorico(resultados) {
+  const problemas = [];
+  const vistos = /* @__PURE__ */ new Map();
+  let anterior = null;
+  for (const r of resultados) {
+    const c = r.concurso;
+    if (vistos.has(c)) problemas.push({ tipo: "duplicado", concurso: c, msg: `Concurso ${c} aparece mais de uma vez` });
+    vistos.set(c, r);
+    const d = r.resultado || [];
+    if (d.length !== 15) problemas.push({ tipo: "dezenas", concurso: c, msg: `Concurso ${c}: ${d.length} dezenas (esperado 15)` });
+    else if (new Set(d).size !== 15) problemas.push({ tipo: "dezenas", concurso: c, msg: `Concurso ${c}: dezena repetida` });
+    else if (d.some((n) => !Number.isInteger(n) || n < 1 || n > 25)) problemas.push({ tipo: "dezenas", concurso: c, msg: `Concurso ${c}: dezena fora de 1–25` });
+    const iso = dataISO(r.data);
+    if (!iso) problemas.push({ tipo: "data", concurso: c, msg: `Concurso ${c}: data ausente ou inválida` });
+    else {
+      if ((/* @__PURE__ */ new Date(`${iso}T12:00:00Z`)).getUTCDay() === 0) problemas.push({ tipo: "aviso", concurso: c, msg: `Concurso ${c}: sorteio num domingo (${r.data})` });
+      if (anterior?.iso && iso < anterior.iso) problemas.push({ tipo: "data", concurso: c, msg: `Concurso ${c}: data anterior à do concurso ${anterior.concurso}` });
+    }
+    anterior = { concurso: c, iso };
+  }
+  const nums = [...vistos.keys()].sort((a, b) => a - b);
+  const ausentes = [];
+  for (let i = 1; i < nums.length; i++) for (let c = nums[i - 1] + 1; c < nums[i] && ausentes.length < 200; c++) ausentes.push(c);
+  ausentes.forEach((c) => problemas.push({ tipo: "ausente", concurso: c, msg: `Concurso ${c} ausente` }));
+  const porCombinacao = /* @__PURE__ */ new Map();
+  for (const r of resultados) {
+    const k = (r.resultado || []).join(",");
+    if (porCombinacao.has(k)) problemas.push({ tipo: "aviso", concurso: r.concurso, msg: `Concurso ${r.concurso} tem o mesmo resultado do ${porCombinacao.get(k)}` });
+    else porCombinacao.set(k, r.concurso);
+  }
+  const graves = problemas.filter((p) => p.tipo !== "aviso").length;
+  return { n: resultados.length, primeiro: nums[0], ultimo: nums[nums.length - 1], problemas, graves, hash: hashHistorico(resultados), integro: graves === 0 };
+}
+function linhaDoTempo(app) {
+  const ev = [];
+  Object.entries(app.correcoes || {}).forEach(([c, v]) => ev.push({ em: v.em, tipo: "correção", texto: `Concurso ${c} corrigido: ${v.motivo}` }));
+  Object.entries(app.mapas || {}).forEach(([c, v]) => v.salvoEm && ev.push({ em: v.salvoEm, tipo: "mapa", texto: `Mapa do concurso ${c} salvo` }));
+  (app.hipoteses || []).forEach((h) => ev.push({ em: h.criadaEm, tipo: "hipótese", texto: `Hipótese congelada: ${h.rotuloSinal} (${h.hash})` }));
+  (app.diario || []).forEach((d) => ev.push({ em: d.registradoEm, tipo: "previsão", texto: `Previsão ${d.motor} para o concurso ${d.concurso} (${d.hash})` }));
+  (app.resultados || []).forEach((r) => r.adicionadoEm && ev.push({ em: r.adicionadoEm, tipo: "resultado", texto: `Resultado do concurso ${r.concurso} adicionado manualmente` }));
+  if (app.autoteste) ev.push({ em: app.autoteste.em, tipo: "autoteste", texto: `Autoteste científico: ${app.autoteste.aprovados}/${app.autoteste.total} aprovados` });
+  return ev.filter((e) => e.em).sort((a, b) => b.em.localeCompare(a.em));
+}
+
+// src/auditoria/autoteste.js
+function historicoSintetico({ n = 800, semente = 1, tipo = "acaso" } = {}) {
+  const r = rng(semente);
+  const base = Array.from({ length: n }, () => embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15).sort((a, b) => a - b));
+  if (tipo === "acaso") return base;
+  if (tipo === "memoria") {
+    const out = [base[0]];
+    for (let i = 1; i < n; i++) {
+      let d = [...base[i]];
+      const deveSair = out[i - 1].includes(2);
+      if (deveSair && !d.includes(1)) {
+        const sai = d[Math.floor(r() * 15)];
+        d = [...d.filter((x) => x !== sai), 1];
+      }
+      if (!deveSair && d.includes(1)) {
+        const livres = Array.from({ length: 25 }, (_, k) => k + 1).filter((x) => !d.includes(x) && x !== 1);
+        d = [...d.filter((x) => x !== 1), livres[Math.floor(r() * livres.length)]];
+      }
+      out.push(d.sort((a, b) => a - b));
+    }
+    return out;
+  }
+  if (tipo === "viesFrequencia")
+    return base.map((d) => {
+      let x = [...d];
+      for (const alvo of [1, 2, 3]) if (!x.includes(alvo) && r() < 0.35) {
+        const outros = x.filter((y) => y > 3);
+        const sai = outros[Math.floor(r() * outros.length)];
+        x = [...x.filter((y) => y !== sai), alvo];
+      }
+      return x.sort((a, b) => a - b);
+    });
+  return base;
+}
+var assinatura = (res) => hash53(res.registros.map((r) => r.jogo.join(",") + ":" + r.probs.slice(1).map((p) => p.toFixed(6)).join(",")).join("|"));
+async function executarAutoteste(onProgresso) {
+  const testes = [];
+  const passo = async (nome, descricao, fn) => {
+    const t0 = Date.now();
+    let ok = false, detalhe = "";
+    try {
+      [ok, detalhe] = fn();
+    } catch (e) {
+      detalhe = `erro: ${e.message}`;
+    }
+    testes.push({ nome, descricao, ok, detalhe, ms: Date.now() - t0 });
+    if (onProgresso) {
+      onProgresso(testes.length);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  };
+  await passo("Controle negativo (acaso puro)", "Histórico 100% aleatório: o motor não pode acusar padrão.", () => {
+    const res = simular2(historicoSintetico({ semente: 11 }), { aquecimento: 100 });
+    const rel = relatorio(res.registros), conf = prever2(res.estado).confianca;
+    return [conf < 0.8 && Math.abs(rel.zNW) < 3 && rel.phaseShift.p > 0.01, `confiança ${(conf * 100).toFixed(0)}%, z ${rel.zNW.toFixed(2)}, phase-shift p ${rel.phaseShift.p.toFixed(2)}`];
+  });
+  await passo("Placebo (ordem embaralhada)", "Histórico real com a ordem dos concursos embaralhada: padrões temporais precisam sumir.", () => {
+    const res = simular2(embaralhar(historicoSintetico({ semente: 12, tipo: "memoria" }), rng(5)), { aquecimento: 100 });
+    const conf = prever2(res.estado).confianca;
+    return [conf < 0.9, `confiança ${(conf * 100).toFixed(0)}% (o padrão plantado foi destruído pelo embaralhamento)`];
+  });
+  await passo("Controle positivo (memória plantada)", "Padrão temporal plantado de propósito: o motor precisa encontrar.", () => {
+    const res = simular2(historicoSintetico({ semente: 13, tipo: "memoria" }), { aquecimento: 100 });
+    const rel = relatorio(res.registros), conf = prever2(res.estado).confianca;
+    return [conf > 0.95 && rel.auc > 0.51, `confiança ${(conf * 100).toFixed(0)}%, AUC ${rel.auc.toFixed(3)}, acertos ${rel.acertosMedios.toFixed(3)}`];
+  });
+  await passo("Controle positivo (viés de frequência)", "Três dezenas favorecidas: o motor precisa encontrar.", () => {
+    const res = simular2(historicoSintetico({ semente: 14, tipo: "viesFrequencia" }), { aquecimento: 100 });
+    const p = prever2(res.estado);
+    return [p.confianca > 0.95 && [1, 2, 3].every((n) => p.jogo.includes(n)), `confiança ${(p.confianca * 100).toFixed(0)}%, 1–3 no jogo: ${[1, 2, 3].every((n) => p.jogo.includes(n)) ? "sim" : "não"}`];
+  });
+  await passo("Vazamento de dados", "Alterar concursos FUTUROS não pode mudar nenhuma previsão do passado.", () => {
+    const h = historicoSintetico({ semente: 15, n: 500 });
+    const alterado = [...h.slice(0, 400), ...historicoSintetico({ semente: 99, n: 100 })];
+    const a = simular2(h, { aquecimento: 100 }).registros.slice(0, 300), b = simular2(alterado, { aquecimento: 100 }).registros.slice(0, 300);
+    const iguais = a.every((r, i) => r.probs.every((p, k) => p === b[i].probs[k]));
+    return [iguais, iguais ? "as 300 previsões anteriores à alteração ficaram idênticas" : "previsões do passado mudaram"];
+  });
+  await passo("Determinismo", "Rodar duas vezes com os mesmos dados dá exatamente o mesmo resultado.", () => {
+    const h = historicoSintetico({ semente: 16, n: 400 });
+    const h1 = assinatura(simular2(h, { aquecimento: 100 })), h2 = assinatura(simular2(h, { aquecimento: 100 }));
+    return [h1 === h2, `assinatura ${h1}`];
+  });
+  return { testes, aprovados: testes.filter((t) => t.ok).length, total: testes.length, em: (/* @__PURE__ */ new Date()).toISOString() };
+}
+
+// src/versao.js
+var VERSAO = "13.3.0";
+var VERSAO_MOTORES = { astral: "astral-2", quantico: "quantico-2", popularidade: "pop-1", gerador: "anneal-1" };
+
+// src/ui/AbaAuditoria.jsx
+var GLOSSARIO = [
+  ["Test-then-learn (replay)", "Cada concurso é previsto só com os concursos anteriores; só depois o resultado entra no aprendizado. É como o sistema funcionaria na vida real."],
+  ["Modelo nulo", "A hipótese de que o sorteio é aleatório: cada dezena tem 60% de chance e um jogo acerta 9 em média."],
+  ["Brier / log-loss", "Medem o erro das probabilidades previstas. Ganho positivo = o motor previu melhor que o nulo."],
+  ["AUC", "Chance de uma dezena sorteada ter recebido probabilidade maior que uma não sorteada. 0,5 = sem informação."],
+  ["Calibração (ECE)", "Diferença média entre o que o motor diz (ex.: 62%) e o que acontece. Perto de 0 = calibrado."],
+  ["z Newey-West", "Quantos erros-padrão a vantagem está acima de zero, corrigindo autocorrelação. Acima de 2 começa a ser relevante."],
+  ["Bootstrap em blocos", "Reamostra trechos do histórico para obter um intervalo de confiança honesto."],
+  ["Phase-shift", "Desalinha previsões e resultados de propósito. Se o motor alinhado não vence os desalinhados, não há informação."],
+  ["E-processo / e-value", "Placar de evidência que pode ser consultado a qualquer momento sem inflar falso positivo. Acima de 20 = evidência (5%)."],
+  ["Teste de permutação", "Embaralha resultados (ou a ordem) e treina de novo. Se o real não supera os embaralhados, é acaso."],
+  ["Ablação", "Tira uma família e roda tudo de novo, para medir quanto ela realmente contribui."],
+  ["Contrafactual", "Como ficaria a probabilidade de uma dezena se uma família fosse ignorada hoje."],
+  ["Governança", "Champion/Challenger/Watch/Quarantine: status de cada família pela vantagem recente sobre o acaso."],
+  ["Mistura bayesiana", "Todos os modelos votam com peso proporcional ao quanto previram bem (com esquecimento do passado)."],
+  ["FDR", "Controle da proporção de falsas descobertas quando se fazem milhares de testes."],
+  ["SPRT", "Teste sequencial do Laboratório: decide confirmar ou rejeitar uma hipótese assim que há evidência suficiente."],
+  ["Popularidade", "Quanto o público joga combinações parecidas. Não muda a chance de ganhar; muda com quantos você divide o prêmio."],
+  ["Controle negativo / placebo", "Dados sem sinal (ou com o sinal destruído) em que o motor NÃO pode acusar nada."],
+  ["Controle positivo", "Dados com um sinal plantado de propósito, que o motor PRECISA encontrar."]
+];
+function baixar(nome, conteudo, tipo) {
+  try {
+    const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nome;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1e3);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function AbaAuditoria({ app, concursos, acoes, hashHist }) {
+  const [rodando, setRodando] = useState10(null);
+  const [msg, setMsg] = useState10(null);
+  const verif = useMemo7(() => verificarHistorico(app.resultados), [app.resultados]);
+  const eventos = useMemo7(() => linhaDoTempo(app), [app]);
+  const auto = app.autoteste;
+  const nMapas = concursos.filter((c) => c.chaves).length;
+  const resPorConcurso = useMemo7(() => new Map(app.resultados.map((r) => [r.concurso, r.resultado])), [app.resultados]);
+  const placar = useMemo7(() => placarDiario(app.diario, resPorConcurso), [app.diario, resPorConcurso]);
+  const previsoesSemManifesto = app.diario.filter((d) => !d.manifesto).length;
+  const indicadores = [
+    { nome: "Integridade dos dados", ok: verif.integro, texto: verif.integro ? `${verif.n.toLocaleString("pt-BR")} concursos sem problema grave` : `${verif.graves} problema(s) grave(s)` },
+    { nome: "Autoteste científico", ok: auto ? auto.aprovados === auto.total : null, texto: auto ? `${auto.aprovados}/${auto.total} em ${new Date(auto.em).toLocaleDateString("pt-BR")}` : "ainda não executado" },
+    { nome: "Reprodutibilidade", ok: previsoesSemManifesto === 0, texto: previsoesSemManifesto ? `${previsoesSemManifesto} previsão(ões) antiga(s) sem manifesto` : "toda previsão tem manifesto e hash" },
+    { nome: "Correções manuais", ok: true, texto: `${Object.keys(app.correcoes || {}).length} registrada(s), com motivo` }
+  ];
+  const pontuacao = indicadores.filter((i) => i.ok === true).length / indicadores.length;
+  const rodarAutoteste = async () => {
+    setRodando(0);
+    const r = await executarAutoteste((i) => setRodando(i));
+    acoes.salvarAutoteste(r);
+    setRodando(null);
+  };
+  const manifesto = () => ({
+    sistema: "Lotofácil Astro",
+    versao: VERSAO,
+    motores: VERSAO_MOTORES,
+    geradoEm: (/* @__PURE__ */ new Date()).toISOString(),
+    historico: { concursos: verif.n, primeiro: verif.primeiro, ultimo: verif.ultimo, hash: hashHist, correcoes: app.correcoes || {} },
+    mapas: nMapas,
+    hipoteses: app.hipoteses.length,
+    previsoesArquivadas: app.diario.length,
+    config: app.config,
+    autoteste: auto || null,
+    placarProducao: placar
+  });
+  const csvHistorico = () => ["concurso;data;dezenas;corrigido", ...app.resultados.map((r) => `${r.concurso};${r.data};${r.resultado.join(" ")};${r.corrigido ? "sim" : ""}`)].join("\n");
+  const csvPrevisoes = () => ["id;concurso;motor;registradoEm;jogo;acertos;hashHistorico;hash", ...app.diario.map((d) => {
+    const res = resPorConcurso.get(d.concurso);
+    return `${d.id};${d.concurso};${d.motor};${d.registradoEm};${d.jogo.join(" ")};${res ? d.jogo.filter((n) => res.includes(n)).length : ""};${d.manifesto?.hashHistorico || ""};${d.hash}`;
+  })].join("\n");
+  const exportar = (nome, conteudo, tipo) => setMsg(baixar(nome, conteudo, tipo) ? `${nome} gerado.` : "Download bloqueado neste ambiente. Use a aba Backup para copiar os dados.");
+  return <>
+      <Card titulo="Saúde científica">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <Metrica rotulo="Índice de saúde" valor={`${Math.round(pontuacao * 100)}%`} tom={pontuacao === 1 ? "bom" : pontuacao >= 0.5 ? "alerta" : "ruim"} detalhe="indicadores aprovados" />
+          <Metrica rotulo="Hash do histórico" valor={hashHist} detalhe="muda se qualquer resultado mudar" />
+          <Metrica rotulo="Versão" valor={VERSAO} detalhe={Object.values(VERSAO_MOTORES).join(" · ")} />
+        </div>
+        <Tabela colunas={[
+    { id: "nome", titulo: "Indicador" },
+    { id: "ok", titulo: "", render: (l) => <Chip tom={l.ok === true ? "bom" : l.ok === false ? "ruim" : "neutro"}>{l.ok === true ? "ok" : l.ok === false ? "atenção" : "pendente"}</Chip> },
+    { id: "texto", titulo: "Situação" }
+  ]} linhas={indicadores.map((i) => ({ ...i, __id: i.nome }))} />
+      </Card>
+
+      <Card titulo="Autoteste científico" acao={<Botao onClick={rodarAutoteste} disabled={rodando != null}>{rodando != null ? `Rodando ${rodando}/6…` : "Rodar autoteste"}</Botao>}>
+        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>
+          Roda o motor Quântico em históricos sintéticos cujo resultado já se sabe: acaso puro e placebo (não pode acusar nada), padrões plantados
+          (precisa encontrar), vazamento (mudar o futuro não pode mudar o passado) e determinismo (mesma entrada, mesma saída). Leva ~10 s.
+        </div>
+        {auto && <Tabela colunas={[
+    { id: "nome", titulo: "Teste", render: (l) => <div><div>{l.nome}</div><div style={{ fontSize: 11.5, color: T.textMuted }}>{l.descricao}</div></div> },
+    { id: "ok", titulo: "", render: (l) => <Chip tom={l.ok ? "bom" : "ruim"}>{l.ok ? "passou" : "falhou"}</Chip> },
+    { id: "detalhe", titulo: "Resultado", render: (l) => <span style={{ fontSize: 12.5 }}>{l.detalhe}</span> },
+    { id: "ms", titulo: "Tempo", alinhar: "right", mono: true, render: (l) => `${(l.ms / 1e3).toFixed(1)} s` }
+  ]} linhas={auto.testes.map((t) => ({ ...t, __id: t.nome }))} />}
+      </Card>
+
+      <Card titulo="Integridade dos dados">
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <Metrica rotulo="Concursos" valor={verif.n.toLocaleString("pt-BR")} detalhe={`${verif.primeiro} a ${verif.ultimo}`} />
+          <Metrica rotulo="Problemas graves" valor={verif.graves} tom={verif.graves ? "ruim" : "bom"} detalhe="duplicados, ausentes, dezenas ou datas inválidas" />
+          <Metrica rotulo="Avisos" valor={verif.problemas.length - verif.graves} detalhe="ex.: sorteio em domingo, resultado repetido" />
+        </div>
+        {verif.problemas.length ? <details>
+            <summary style={{ cursor: "pointer", color: T.textSoft, fontSize: 13 }}>Ver lista ({verif.problemas.length})</summary>
+            <div style={{ marginTop: 8, maxHeight: 260, overflowY: "auto" }}>
+              {verif.problemas.map((p, i) => <div key={i} style={{ fontSize: 12.5, padding: "3px 0", color: p.tipo === "aviso" ? T.textSoft : T.ruim }}>{p.msg}</div>)}
+            </div>
+          </details> : <Aviso tom="bom">Nenhum problema encontrado.</Aviso>}
+        <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Proveniência: concursos 1–3789 da planilha oficial da Caixa (embutida); concursos novos digitados à mão ficam marcados na linha do tempo; correções têm motivo e data.</div>
+      </Card>
+
+      <Card titulo="Linha do tempo de alterações">
+        <Tabela vazio="Nenhuma alteração registrada ainda." colunas={[
+    { id: "em", titulo: "Quando", mono: true, render: (l) => new Date(l.em).toLocaleString("pt-BR") },
+    { id: "tipo", titulo: "Tipo", render: (l) => <Chip>{l.tipo}</Chip> },
+    { id: "texto", titulo: "O quê" }
+  ]} linhas={eventos.slice(0, 80).map((e, i) => ({ ...e, __id: i }))} />
+      </Card>
+
+      <Card titulo="Manifesto e exportações">
+        {msg && <Aviso tom="info">{msg}</Aviso>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Botao variante="secundario" onClick={() => exportar(`manifesto-${hashHist}.json`, JSON.stringify(manifesto(), null, 2), "application/json")}>Manifesto científico (JSON)</Botao>
+          <Botao variante="discreto" onClick={() => exportar("historico.csv", csvHistorico(), "text/csv")}>Histórico (CSV)</Botao>
+          <Botao variante="discreto" onClick={() => exportar("arquivo-de-previsoes.csv", csvPrevisoes(), "text/csv")}>Arquivo de previsões (CSV)</Botao>
+        </div>
+        <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>O manifesto traz versão dos motores, hash do histórico, correções, configuração, último autoteste e o placar de produção: o suficiente para reproduzir e auditar o estado atual.</div>
+      </Card>
+
+      <Card titulo="Glossário">
+        {GLOSSARIO.map(([termo, texto]) => <div key={termo} style={{ padding: "6px 0", borderTop: `1px solid ${T.borderSoft}`, fontSize: 13 }}>
+            <b style={{ color: T.goldText }}>{termo}.</b> <span style={{ color: T.textSoft }}>{texto}</span>
+          </div>)}
+      </Card>
+    </>;
+}
+
 // src/App.jsx
 var ABAS = [
   ["concurso", "Concurso"],
@@ -7462,15 +8009,16 @@ var ABAS = [
   ["laboratorio", "Laboratório"],
   ["placar", "Placar"],
   ["quantico", "Quântico ⚛"],
+  ["auditoria", "Auditoria"],
   ["backup", "Backup"]
 ];
 function App() {
-  const [app, setApp] = useState10(null);
-  const [aba, setAba] = useState10("concurso");
-  const [concursoAberto, setConcursoAberto] = useState10(null);
-  const [simulacao, setSimulacao] = useState10(null);
-  const [calculando, setCalculando] = useState10(false);
-  const [erroSalvar, setErroSalvar] = useState10(null);
+  const [app, setApp] = useState11(null);
+  const [aba, setAba] = useState11("concurso");
+  const [concursoAberto, setConcursoAberto] = useState11(null);
+  const [simulacao, setSimulacao] = useState11(null);
+  const [calculando, setCalculando] = useState11(false);
+  const [erroSalvar, setErroSalvar] = useState11(null);
   const primeiraCarga = useRef(true);
   useEffect3(() => {
     carregar().then(setApp);
@@ -7486,9 +8034,10 @@ function App() {
     }, 400);
     return () => clearTimeout(t);
   }, [app]);
-  const resultadosEfetivos = useMemo7(() => app ? aplicarCorrecoes(app.resultados, app.correcoes) : [], [app?.resultados, app?.correcoes]);
-  const appEfetivo = useMemo7(() => app ? { ...app, resultados: resultadosEfetivos } : null, [app, resultadosEfetivos]);
-  const { concursos, meta } = useMemo7(() => appEfetivo ? montarConcursos(appEfetivo) : { concursos: [], meta: /* @__PURE__ */ new Map() }, [resultadosEfetivos, app?.mapas, app?.config]);
+  const resultadosEfetivos = useMemo8(() => app ? aplicarCorrecoes(app.resultados, app.correcoes) : [], [app?.resultados, app?.correcoes]);
+  const appEfetivo = useMemo8(() => app ? { ...app, resultados: resultadosEfetivos } : null, [app, resultadosEfetivos]);
+  const hashHist = useMemo8(() => hashHistorico(resultadosEfetivos), [resultadosEfetivos]);
+  const { concursos, meta } = useMemo8(() => appEfetivo ? montarConcursos(appEfetivo) : { concursos: [], meta: /* @__PURE__ */ new Map() }, [resultadosEfetivos, app?.mapas, app?.config]);
   useEffect3(() => {
     if (!app) return;
     setCalculando(true);
@@ -7500,6 +8049,7 @@ function App() {
   }, [concursos]);
   if (!app) return <div style={{ background: T.bg, minHeight: "100vh", color: T.textSoft, padding: 40, fontFamily: T.sans }}>Carregando…</div>;
   const atualizar = (f) => setApp((a) => ({ ...a, ...f(a) }));
+  const manifesto = (motor) => ({ versao: VERSAO, motor: VERSAO_MOTORES[motor === "quantico" ? "quantico" : "astral"], hashHistorico: hashHist, nResultados: resultadosEfetivos.length, nMapas: concursos.filter((c) => c.chaves).length, config: app.config });
   const acoes = {
     salvarMapa: (concurso, texto, data) => atualizar((a) => ({ mapas: { ...a.mapas, [concurso]: { texto, data, salvoEm: (/* @__PURE__ */ new Date()).toISOString() } } })),
     removerMapa: (concurso) => atualizar((a) => {
@@ -7515,7 +8065,7 @@ function App() {
       return { mapas: m };
     }),
     salvarResultado: (concurso, data, resultado) => atualizar((a) => ({
-      resultados: [...a.resultados.filter((r) => r.concurso !== concurso), { concurso, data, resultado }].sort((x, y) => x.concurso - y.concurso)
+      resultados: [...a.resultados.filter((r) => r.concurso !== concurso), { concurso, data, resultado, adicionadoEm: (/* @__PURE__ */ new Date()).toISOString() }].sort((x, y) => x.concurso - y.concurso)
     })),
     criarHipotese: async (dados) => {
       const h = await criarHipotese(dados);
@@ -7525,16 +8075,17 @@ function App() {
     // Arquivo de previsões: a primeira previsão de cada concurso por motor
     // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
-      const registros = await Promise.all(Object.keys(MOTORES).map((m) => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null })));
+      const registros = await Promise.all(Object.keys(MOTORES).map((m) => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null, manifesto: manifesto(m) })));
       atualizar((a) => ({ diario: [...a.diario, ...registros.filter((r) => !a.diario.some((d) => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
     registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
-      const r = await registrarNoDiario({ concurso, motor, jogo, probs });
+      const r = await registrarNoDiario({ concurso, motor, jogo, probs, manifesto: manifesto(motor) });
       atualizar((a) => a.diario.some((d) => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] });
     },
     corrigirResultado: (concurso, resultado, motivo) => atualizar((a) => ({
       correcoes: { ...a.correcoes, [concurso]: { resultado, motivo, em: (/* @__PURE__ */ new Date()).toISOString(), original: a.resultados.find((r) => r.concurso === concurso)?.resultado || null } }
     })),
+    salvarAutoteste: (r) => atualizar(() => ({ autoteste: r })),
     removerCorrecao: (concurso) => atualizar((a) => {
       const c = { ...a.correcoes };
       delete c[concurso];
@@ -7546,7 +8097,7 @@ function App() {
   };
   const nMapas = concursos.filter((c) => c.chaves).length;
   const pesoAstral = simulacao?.trilha.at(-1)?.pesoAstral;
-  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando };
+  const props = { app: appEfetivo, concursos, meta, acoes, simulacao, calculando, hashHist };
   return <div style={{ background: `radial-gradient(1200px 600px at 20% -10%, #1A2140 0%, ${T.bg} 55%)`, minHeight: "100vh", color: T.text, fontFamily: T.sans }}>
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "22px 16px 60px" }}>
         <header style={{ marginBottom: 16 }}>
@@ -7575,6 +8126,7 @@ function App() {
         {aba === "laboratorio" && <AbaLaboratorio {...props} />}
         {aba === "placar" && <AbaPlacar {...props} />}
         {aba === "quantico" && <AbaQuantico {...props} />}
+        {aba === "auditoria" && <AbaAuditoria {...props} />}
         {aba === "backup" && <AbaBackup {...props} />}
       </div>
     </div>;

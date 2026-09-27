@@ -69,9 +69,9 @@ export function avaliarHipotese(h, concursos) {
 // existir no sistema. A PRIMEIRA previsão de cada concurso por motor fica
 // congelada (data/hora + hash, sem edição). Quando há probabilidades, elas
 // também são arquivadas, o que permite medir Brier e log-loss reais.
-export async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null }) {
+export async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, probs = null, manifesto = null }) {
   const base = {
-    concurso, motor, jogo: [...jogo].sort((a, b) => a - b), pesoAstral,
+    concurso, motor, jogo: [...jogo].sort((a, b) => a - b), pesoAstral, manifesto,
     probs: probs ? Array.from({ length: 25 }, (_, i) => Math.round(probs[i + 1] * 1e5) / 1e5) : null,
     registradoEm: new Date().toISOString(),
   };

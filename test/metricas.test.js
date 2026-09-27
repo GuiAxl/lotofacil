@@ -61,9 +61,17 @@ test("arquivo de previsões: congela a primeira e reavalia após correção", as
   assert.ok(Math.abs(placar(oficial).x.ganhoBrier) < 1e-9);
 });
 
-test("próximo concurso: pula domingo", () => {
-  assert.deepEqual(estimarProximo([{ concurso: 3789, data: "25/09/2026" }]), { concurso: 3790, data: "26/09/2026" });
-  assert.deepEqual(estimarProximo([{ concurso: 3790, data: "26/09/2026" }]), { concurso: 3791, data: "28/09/2026" });
+test("próximo concurso: segue os dias da semana com sorteio recente", async () => {
+  const { HISTORICO } = await import("../src/dados/historico.js");
+  const R = HISTORICO.map(h => ({ concurso: h.concurso, data: h.data, resultado: h.dezenas }));
+  // Até o 3500 não havia sorteio aos domingos: depois de um sábado, vem segunda.
+  const ate = R.slice(0, 3500);
+  const prox = estimarProximo(ate);
+  assert.equal(prox.concurso, 3501);
+  assert.equal(prox.data, R[3500].data);
+  const sabado = [{ concurso: 1, data: "26/09/2026" }, ...Array.from({ length: 12 }, (_, i) => ({ concurso: 2 + i, data: `${String(14 + i).padStart(2, "0")}/09/2026` })).filter(r => new Date(Date.UTC(2026, 8, +r.data.slice(0, 2))).getUTCDay() !== 0)];
+  sabado.sort((a, b) => a.data.localeCompare(b.data));
+  assert.equal(estimarProximo([...sabado.slice(1), { concurso: 99, data: "26/09/2026" }]).data, "28/09/2026");
 });
 
 test("quântico v2: governança, explicação e contrafactual coerentes", () => {

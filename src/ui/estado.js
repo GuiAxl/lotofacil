@@ -26,15 +26,19 @@ export function aplicarCorrecoes(resultados, correcoes = {}) {
   return resultados.map(r => (correcoes[r.concurso] ? { ...r, resultado: correcoes[r.concurso].resultado, corrigido: true, original: r.resultado } : r));
 }
 
-// Próximo concurso e data estimada: a Lotofácil sorteia de segunda a sábado.
-// Feriados não são considerados (a data é uma estimativa).
+// Próximo concurso e data estimada: o próximo dia da semana que teve sorteio
+// nos últimos 30 concursos (o calendário muda — em 2026 houve domingos).
+// Feriados e suspensões não são previstos: a data é uma estimativa.
 export function estimarProximo(resultados) {
   const ultimo = resultados[resultados.length - 1];
-  const m = String(ultimo?.data || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const paraData = s => { const m = String(s || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? new Date(Date.UTC(+m[3], +m[2] - 1, +m[1])) : null; };
+  const dias = new Set(resultados.slice(-30).map(r => paraData(r.data)?.getUTCDay()).filter(d => d != null));
+  if (!dias.size) [1, 2, 3, 4, 5, 6].forEach(d => dias.add(d));
   let data = "";
-  if (m) {
-    const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
-    do d.setUTCDate(d.getUTCDate() + 1); while (d.getUTCDay() === 0);
+  const d = paraData(ultimo?.data);
+  if (d) {
+    let passos = 0;
+    do { d.setUTCDate(d.getUTCDate() + 1); passos++; } while (!dias.has(d.getUTCDay()) && passos < 7);
     data = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
   }
   return { concurso: (ultimo?.concurso || 0) + 1, data };
@@ -67,7 +71,7 @@ export function mesclarComInicial(salvo) {
   // O resultado oficial embutido sempre vence; do salvo só entram concursos novos.
   for (const r of salvo.resultados || []) {
     const c = Number(r.concurso);
-    if (!porConcurso.has(c) && validarResultado(r.resultado)) porConcurso.set(c, { concurso: c, data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b) });
+    if (!porConcurso.has(c) && validarResultado(r.resultado)) porConcurso.set(c, { concurso: c, data: r.data || "", resultado: [...r.resultado].sort((a, b) => a - b), ...(r.adicionadoEm ? { adicionadoEm: r.adicionadoEm } : {}) });
   }
   return {
     ...base,
