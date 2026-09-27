@@ -14,7 +14,6 @@ import { P0, logit, sigmoid, rng, embaralhar, calibrarSoma15, acertos, top15, me
 
 export const MOTORES = {
   astral: { nome: "Astral", descricao: "Mistura bayesiana de aprendizes online (regressão logística FTRL) que usam os sinais do mapa, competindo com modelos sem sinal." },
-  legado: { nome: "Legado v12", descricao: "A fórmula do v12: soma (taxa − 60%) × dias de todos os sinais ativos." },
   frequencia: { nome: "Frequência", descricao: "Controle sem astrologia: os 15 números que mais saíram até o concurso anterior." },
   aleatorio: { nome: "Aleatório", descricao: "Controle: 15 números sorteados (semente = nº do concurso)." },
 };
@@ -141,8 +140,11 @@ export function criarEstado() {
 
 // Pesos da mistura bayesiana. Com soReferencia = true, considera só os
 // modelos sem sinais astrais (a "referência" contra a qual o Astral compete).
+// "Evolui ou sai": aprendiz astral mais de 2 nats pior que o nulo no
+// desempenho acumulado sai da mistura (segue aprendendo em sombra).
+const emQuarentena = (estado, a) => a.astral && a.perda - estado.aprendizes[0].perda > 2;
 export function pesosMistura(estado, soReferencia = false) {
-  const ativo = a => !soReferencia || !a.astral;
+  const ativo = a => (!soReferencia || !a.astral) && !emQuarentena(estado, a);
   const min = Math.min(...estado.aprendizes.filter(ativo).map(a => a.perda));
   const w = estado.aprendizes.map(a => (ativo(a) ? Math.exp(-(a.perda - min)) : 0));
   const soma = w.reduce((x, y) => x + y, 0);
@@ -196,15 +198,6 @@ export function prever(estado, concurso, motor) {
     return { jogo: embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15).sort((a, b) => a - b) };
   }
   if (motor === "frequencia") return { jogo: top15(freq), valores: freq };
-  if (motor === "legado") {
-    const v = new Array(26).fill(0);
-    for (const chave of chaves) {
-      const c = estado.sinais.get(chave);
-      if (!c) continue;
-      for (let n = 1; n <= 25; n++) v[n] += (c.hits[n] / c.dias - P0) * c.dias;
-    }
-    return { jogo: top15(v), valores: v };
-  }
   // astral
   const { p, pesos } = probsMistura(estado, chaves);
   const pesoAstral = estado.aprendizes.reduce((s, a, i) => s + (a.astral ? pesos[i] : 0), 0);
@@ -270,10 +263,9 @@ export function simular(concursos, opcoes = {}) {
 // (os mapas ficam onde estão) e roda a simulação inteira de novo.
 export async function testePermutacao(concursos, opcoes = {}) {
   const { n = 200, semente = 2026, onProgresso, minTreino } = opcoes;
-  const motores = ["astral", "legado"];
+  const motores = ["astral"];
   const estat = r => ({
     astral: media(r.porMotor.astral.acertos),
-    legado: media(r.porMotor.legado.acertos),
     ganhoPerda: r.perda.n ? (r.perda.referencia - r.perda.astral) / r.perda.n : 0,
   });
   const obs = estat(simular(concursos, { minTreino, motores }));
@@ -288,7 +280,7 @@ export async function testePermutacao(concursos, opcoes = {}) {
     if (onProgresso && (i % 5 === 4 || i === n - 1)) { onProgresso(i + 1, n); await new Promise(r => setTimeout(r, 0)); }
   }
   const pValor = campo => (nulos.filter(x => x[campo] >= obs[campo]).length + 1) / (n + 1);
-  return { observado: obs, nulos, p: { astral: pValor("astral"), legado: pValor("legado"), ganhoPerda: pValor("ganhoPerda") }, n };
+  return { observado: obs, nulos, p: { astral: pValor("astral"), ganhoPerda: pValor("ganhoPerda") }, n };
 }
 
 // Estado treinado só com concursos ANTERIORES a `limite` (para prever `limite`).

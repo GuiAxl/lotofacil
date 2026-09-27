@@ -127,7 +127,7 @@ export function avaliarPopularidade(modelo, jogo, ultimo) {
   const { valor, fora } = contribuicao(modelo, jogo, ultimo);
   return { indice: Math.exp(valor - modelo.mediaLog), extrapolado: fora > 0, tracosFora: fora };
 }
-export const indicePopularidade = (modelo, jogo, ultimo) => avaliarPopularidade(modelo, jogo, ultimo).indice;
+
 
 // Prêmio esperado (R$) de 14 e 15 pontos SE este jogo acertar, dado o índice.
 export function premioEsperado(modelo, indice) {

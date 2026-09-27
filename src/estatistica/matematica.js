@@ -66,14 +66,6 @@ export function qValoresBH(pValores) {
   return q;
 }
 
-// Intervalo de Wilson para uma proporção.
-export function wilson(hits, n, z = 1.96) {
-  if (!n) return [0, 1];
-  const p = hits / n, d = 1 + (z * z) / n;
-  const c = (p + (z * z) / (2 * n)) / d, m = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
-  return [Math.max(0, c - m), Math.min(1, c + m)];
-}
-
 // Ajusta um deslocamento c para que a soma das probabilidades seja 15
 // (o sorteio sempre tem exatamente 15 números).
 export function calibrarSoma15(logits) {

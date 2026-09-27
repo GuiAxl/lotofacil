@@ -8,7 +8,7 @@ import {
   BENEFICOS, MALEFICOS, TIPO_CASA, FERTILIDADE, ESTRELAS_FIXAS, VELOCIDADE_MEDIA, PONTOS,
   nomePonto, nomeSigno, nomeAspecto,
 } from "./constantes.js";
-import { norm360, distancia, signoDe, grauNoSigno, casaDe } from "./parser.js";
+import { norm360, distancia, signoDe, grauNoSigno } from "./parser.js";
 
 const ORDEM = Object.fromEntries(PONTOS.map((p, i) => [p.id, i]));
 const par = (a, b) => (ORDEM[a] <= ORDEM[b] ? [a, b] : [b, a]);
@@ -263,5 +263,3 @@ export function extrairSinais(mapa) {
   return [...sinais.values()];
 }
 
-// Casa geométrica de uma longitude qualquer (reexport útil para a UI).
-export { casaDe };

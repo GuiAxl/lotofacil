@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { relatorio, auc, brier, neweyWest, phaseShift, portfolioAleatorio } from "../src/estatistica/metricas.js";
+import { relatorio, auc, brier, neweyWest } from "../src/estatistica/metricas.js";
 import { placarDiario, registrarNoDiario, validarPrevisao } from "../src/estatistica/laboratorio.js";
 import { estimarProximo, aplicarCorrecoes } from "../src/ui/estado.js";
 import { rng, embaralhar, calibrarSoma15, logit } from "../src/estatistica/matematica.js";
@@ -36,13 +36,11 @@ test("relatório: previsões sem informação ficam no nulo; previsões informat
   assert.ok(b.auc > 0.6 && b.ganhoBrier > 0 && b.zNW > 3 && b.phaseShift.p < 0.05);
 });
 
-test("Newey-West e portfólio aleatório", () => {
+test("Newey-West", () => {
   const r = rng(9);
   const x = Array.from({ length: 2000 }, () => r() - 0.5);
   const ep = neweyWest(x);
   assert.ok(ep > 0.004 && ep < 0.01, `ep ${ep}`);
-  const p = portfolioAleatorio(3, { sorteios: 5000 });
-  assert.ok(Math.abs(p.media - 9) < 0.05 && p.melhor > 9.8 && p.melhor < 10.3);
 });
 
 test("arquivo de previsões: congela a primeira e reavalia após correção", async () => {
@@ -85,4 +83,16 @@ test("quântico v2: governança, explicação e contrafactual coerentes", () => 
   const soma = explicarDezena(p, 1).reduce((s, l) => s + l.contribuicao, 0);
   assert.ok(Math.abs(soma - (p.probs[1] - 0.6)) < 1e-9);
   assert.equal(contrafactual(res.estado).length, 9);
+});
+
+test("evolui ou sai: modelo muito pior que o acaso sai da mistura e volta quando melhora", async () => {
+  const { criarEstado, pesosMistura, governanca } = await import("../src/quantico/motor.js");
+  const e = criarEstado();
+  const i = e.modelos.findIndex(m => m.familia === "pares");
+  e.modelos.forEach(m => { m.perda = 100; });
+  e.modelos[i].perda = 103; e.modelos[i + 1].perda = 103; // 3 nats pior que o nulo
+  assert.equal(pesosMistura(e)[i], 0);
+  assert.equal(governanca(e).find(g => g.familia === "pares").status, "Quarantine");
+  e.modelos[i].perda = 100.5;
+  assert.ok(pesosMistura(e)[i] > 0);
 });

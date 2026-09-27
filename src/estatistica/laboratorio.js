@@ -12,7 +12,6 @@ export function dataBRparaISO(data) {
   const m = String(data || "").match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
-export const hojeISO = () => new Date().toISOString().slice(0, 10);
 
 export async function hashConteudo(obj) {
   const texto = JSON.stringify(obj);

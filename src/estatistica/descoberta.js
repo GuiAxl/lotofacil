@@ -4,7 +4,7 @@
 // empírico: cada célula é ruído (taxa = 60%) ou efeito real (taxa ~ Beta
 // centrada em 60%). A fração de efeitos reais e a dispersão deles são
 // estimadas dos próprios dados. Sem sinal no histórico, tudo tende a ~0%.
-import { P0, logit, pBinomialBicaudal, qValoresBH } from "./matematica.js";
+import { P0, pBinomialBicaudal, qValoresBH } from "./matematica.js";
 
 const GRADE_PI = [0.0005, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2];
 const GRADE_KAPPA = [4, 8, 16, 32, 64];
@@ -41,7 +41,6 @@ export function probReal(h, d, hiper) {
   return 1 / (1 + Math.exp(y - x));
 }
 export const taxaEncolhida = (h, d, hiper) => (h + hiper.kappa * P0) / (d + hiper.kappa);
-export const pesoCelula = (h, d, hiper) => probReal(h, d, hiper) * (logit(taxaEncolhida(h, d, hiper)) - logit(P0));
 
 // Máxima verossimilhança de (π₁, κ) numa grade.
 export function ajustarHiper(celulas) {

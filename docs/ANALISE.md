@@ -1,7 +1,7 @@
 # Análise do sistema Lotofácil Astro (v1 → v12)
 
-Data: 27/09/2026. Tudo abaixo pode ser reproduzido com `npm run auditoria`, que roda o
-motor original do v12 sem modificar nenhuma linha dele.
+Data: 27/09/2026. Os scripts que reproduzem estes números (rodando o motor original do v12 sem
+modificar nenhuma linha) estão no commit `fb021ae`, pasta `auditoria/` — removida depois para enxugar o projeto.
 
 ## 1. O que são os 4 arquivos
 

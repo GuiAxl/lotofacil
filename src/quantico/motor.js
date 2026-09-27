@@ -46,6 +46,15 @@ export const FAMILIAS = [
 export const FAMILIAS_SINAL = FAMILIAS.filter(f => f.usa.length).map(f => f.id);
 const TAXAS = [0.003, 0.02];
 export const ESQUECIMENTO = 0.998;
+// "Evolui ou sai": modelo que, no desempenho recente, fica mais de 2 nats
+// (fator de Bayes > 7) PIOR que o acaso sai da mistura. Continua aprendendo
+// em sombra e volta sozinho quando deixa de ser pior que o acaso.
+export const LIMITE_QUARENTENA = 2;
+export const emQuarentena = (estado, m) => {
+  if (m.nulo) return false;
+  const nulo = estado.modelos.find(x => x.nulo);
+  return m.perda - nulo.perda > LIMITE_QUARENTENA;
+};
 const JANELA_KNN = 1500, VIZINHOS_KNN = 40, MAX_GAP = 12;
 
 const popcount = x => { x -= (x >>> 1) & 0x55555555; x = (x & 0x33333333) + ((x >>> 2) & 0x33333333); return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24; };
@@ -145,7 +154,7 @@ function perdaLog(p, sorteado) {
 // Prior: 50% para "é acaso" (nulo) e 50% repartido entre os modelos com padrão.
 // `excluir` remove uma família (contrafactual) e renormaliza.
 export function pesosMistura(estado, excluir = null) {
-  const ativos = estado.modelos.map(m => m.familia !== excluir);
+  const ativos = estado.modelos.map(m => m.familia !== excluir && !emQuarentena(estado, m));
   const M = ativos.filter(Boolean).length;
   const min = Math.min(...estado.modelos.filter((_, i) => ativos[i]).map(m => m.perda));
   const w = estado.modelos.map((m, i) => (ativos[i] ? (m.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)) * Math.exp(-(m.perda - min)) : 0));
@@ -201,14 +210,14 @@ export function governanca(estado) {
     const ms = estado.modelos.filter(m => m.familia === f);
     if (!ms.length) return { familia: f, status: "Desativada" };
     const melhor = ms.reduce((a, b) => (b.perda < a.perda ? b : a));
-    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map(m => m.perdaTotal)) };
+    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map(m => m.perdaTotal)), emSombra: ms.every(m => emQuarentena(estado, m)) };
   });
   const ativas = linhas.filter(l => l.status !== "Desativada");
   const campea = ativas.reduce((a, b) => (b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a), null);
   for (const l of ativas) {
     l.status = l === campea && l.vantagemRecente > 2 ? "Champion"
       : l.vantagemRecente > 0 ? "Challenger"
-      : l.vantagemRecente > -2 ? "Watch" : "Quarantine";
+      : l.emSombra ? "Quarantine" : "Watch";
   }
   return linhas;
 }

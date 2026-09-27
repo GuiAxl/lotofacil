@@ -4773,7 +4773,6 @@ function Aviso({ tom = "alerta", children }) {
 // src/estatistica/motor.js
 var MOTORES = {
   astral: { nome: "Astral", descricao: "Mistura bayesiana de aprendizes online (regressão logística FTRL) que usam os sinais do mapa, competindo com modelos sem sinal." },
-  legado: { nome: "Legado v12", descricao: "A fórmula do v12: soma (taxa − 60%) × dias de todos os sinais ativos." },
   frequencia: { nome: "Frequência", descricao: "Controle sem astrologia: os 15 números que mais saíram até o concurso anterior." },
   aleatorio: { nome: "Aleatório", descricao: "Controle: 15 números sorteados (semente = nº do concurso)." }
 };
@@ -4902,8 +4901,9 @@ function criarEstado() {
     cacheContraste: { versao: -1, chaves: null, porConfig: /* @__PURE__ */ new Map() }
   };
 }
+var emQuarentena = (estado, a) => a.astral && a.perda - estado.aprendizes[0].perda > 2;
 function pesosMistura(estado, soReferencia = false) {
-  const ativo = (a) => !soReferencia || !a.astral;
+  const ativo = (a) => (!soReferencia || !a.astral) && !emQuarentena(estado, a);
   const min = Math.min(...estado.aprendizes.filter(ativo).map((a) => a.perda));
   const w = estado.aprendizes.map((a) => ativo(a) ? Math.exp(-(a.perda - min)) : 0);
   const soma = w.reduce((x, y) => x + y, 0);
@@ -4955,15 +4955,6 @@ function prever(estado, concurso, motor) {
     return { jogo: embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15).sort((a, b) => a - b) };
   }
   if (motor === "frequencia") return { jogo: top15(freq), valores: freq };
-  if (motor === "legado") {
-    const v = new Array(26).fill(0);
-    for (const chave of chaves) {
-      const c = estado.sinais.get(chave);
-      if (!c) continue;
-      for (let n = 1; n <= 25; n++) v[n] += (c.hits[n] / c.dias - P0) * c.dias;
-    }
-    return { jogo: top15(v), valores: v };
-  }
   const { p, pesos } = probsMistura(estado, chaves);
   const pesoAstral = estado.aprendizes.reduce((s, a, i) => s + (a.astral ? pesos[i] : 0), 0);
   return { jogo: top15(p, freq), valores: p, pesos, pesoAstral };
@@ -5018,10 +5009,9 @@ function simular(concursos, opcoes = {}) {
 }
 async function testePermutacao(concursos, opcoes = {}) {
   const { n = 200, semente = 2026, onProgresso, minTreino } = opcoes;
-  const motores = ["astral", "legado"];
+  const motores = ["astral"];
   const estat = (r) => ({
     astral: media(r.porMotor.astral.acertos),
-    legado: media(r.porMotor.legado.acertos),
     ganhoPerda: r.perda.n ? (r.perda.referencia - r.perda.astral) / r.perda.n : 0
   });
   const obs = estat(simular(concursos, { minTreino, motores }));
@@ -5039,7 +5029,7 @@ async function testePermutacao(concursos, opcoes = {}) {
     }
   }
   const pValor = (campo) => (nulos.filter((x) => x[campo] >= obs[campo]).length + 1) / (n + 1);
-  return { observado: obs, nulos, p: { astral: pValor("astral"), legado: pValor("legado"), ganhoPerda: pValor("ganhoPerda") }, n };
+  return { observado: obs, nulos, p: { astral: pValor("astral"), ganhoPerda: pValor("ganhoPerda") }, n };
 }
 function treinarAte(concursos, limite) {
   const estado = criarEstado();
@@ -5125,6 +5115,15 @@ async function registrarNoDiario({ concurso, motor, jogo, pesoAstral = null, pro
     registradoEm: (/* @__PURE__ */ new Date()).toISOString()
   };
   return { id: `dia_${Date.now().toString(36)}_${motor}`, ...base, hash: await hashConteudo(base) };
+}
+function validarPrevisao({ jogo, probs }) {
+  const erros = [];
+  if (!Array.isArray(jogo) || jogo.length !== 15 || new Set(jogo).size !== 15 || jogo.some((n) => !Number.isInteger(n) || n < 1 || n > 25)) erros.push("jogo inválido");
+  if (probs) {
+    const soma = probs.slice(1).reduce((a, b) => a + b, 0);
+    if (probs.slice(1).some((p) => !(p > 0 && p < 1)) || Math.abs(soma - 15) > 0.01) erros.push("universo de probabilidades inválido (precisa somar 15)");
+  }
+  return erros;
 }
 function placarDiario(diario, resultadosPorConcurso) {
   const porMotor = {};
@@ -6126,7 +6125,6 @@ function AbaPlacar({ app, concursos, simulacao, calculando }) {
             {perm && <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
                 <Metrica rotulo="p · ganho de informação" valor={dec(perm.p.ganhoPerda, 3)} tom={perm.p.ganhoPerda < 0.05 ? "bom" : void 0} detalhe="principal" />
                 <Metrica rotulo="p · acertos Astral" valor={dec(perm.p.astral, 3)} tom={perm.p.astral < 0.05 ? "bom" : void 0} />
-                <Metrica rotulo="p · acertos Legado v12" valor={dec(perm.p.legado, 3)} tom={perm.p.legado < 0.05 ? "bom" : void 0} />
               </div>}
           </Card>
           {veredito && <Aviso tom={veredito.tom}>{veredito.txt}</Aviso>}
@@ -6495,6 +6493,12 @@ var FAMILIAS = [
 var FAMILIAS_SINAL = FAMILIAS.filter((f) => f.usa.length).map((f) => f.id);
 var TAXAS = [3e-3, 0.02];
 var ESQUECIMENTO = 0.998;
+var LIMITE_QUARENTENA = 2;
+var emQuarentena2 = (estado, m) => {
+  if (m.nulo) return false;
+  const nulo = estado.modelos.find((x) => x.nulo);
+  return m.perda - nulo.perda > LIMITE_QUARENTENA;
+};
 var JANELA_KNN = 1500;
 var VIZINHOS_KNN = 40;
 var MAX_GAP = 12;
@@ -6600,7 +6604,7 @@ function perdaLog2(p, sorteado) {
   return s;
 }
 function pesosMistura2(estado, excluir = null) {
-  const ativos = estado.modelos.map((m) => m.familia !== excluir);
+  const ativos = estado.modelos.map((m) => m.familia !== excluir && !emQuarentena2(estado, m));
   const M = ativos.filter(Boolean).length;
   const min = Math.min(...estado.modelos.filter((_, i) => ativos[i]).map((m) => m.perda));
   const w = estado.modelos.map((m, i) => ativos[i] ? (m.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)) * Math.exp(-(m.perda - min)) : 0);
@@ -6649,12 +6653,12 @@ function governanca(estado) {
     const ms = estado.modelos.filter((m) => m.familia === f);
     if (!ms.length) return { familia: f, status: "Desativada" };
     const melhor = ms.reduce((a, b) => b.perda < a.perda ? b : a);
-    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map((m) => m.perdaTotal)) };
+    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map((m) => m.perdaTotal)), emSombra: ms.every((m) => emQuarentena2(estado, m)) };
   });
   const ativas = linhas.filter((l) => l.status !== "Desativada");
   const campea = ativas.reduce((a, b) => b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a, null);
   for (const l of ativas) {
-    l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.vantagemRecente > -2 ? "Watch" : "Quarantine";
+    l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.emSombra ? "Quarantine" : "Watch";
   }
   return linhas;
 }
@@ -7343,7 +7347,7 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
     { id: "tot", titulo: "Vantagem acumulada", alinhar: "right", mono: true, render: (l) => l.vantagemTotal == null ? "—" : `${l.vantagemTotal >= 0 ? "+" : ""}${dec(l.vantagemTotal, 1)} nats` },
     { id: "peso", titulo: "Peso hoje", alinhar: "right", mono: true, render: (l) => pct(prox.familias[l.familia] || 0, 1) }
   ]} linhas={gov.map((g) => ({ ...g, __id: g.familia }))} />
-        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: pior que o acaso.</div>
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: mais de 2 nats pior que o acaso, fora da mistura, aprendendo em sombra até melhorar ("evolui ou sai").</div>
       </Card>
 
       <Card titulo="Comparação com baselines permanentes">
@@ -8076,9 +8080,11 @@ function App() {
     // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
       const registros = await Promise.all(Object.keys(MOTORES).map((m) => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null, manifesto: manifesto(m) })));
-      atualizar((a) => ({ diario: [...a.diario, ...registros.filter((r) => !a.diario.some((d) => d.concurso === r.concurso && d.motor === r.motor))] }));
+      const validos = registros.filter((r) => !validarPrevisao({ jogo: r.jogo, probs: r.probs ? [0, ...r.probs] : null }).length);
+      atualizar((a) => ({ diario: [...a.diario, ...validos.filter((r) => !a.diario.some((d) => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
     registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
+      if (validarPrevisao({ jogo, probs }).length) return;
       const r = await registrarNoDiario({ concurso, motor, jogo, probs, manifesto: manifesto(motor) });
       atualizar((a) => a.diario.some((d) => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] });
     },

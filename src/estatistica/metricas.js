@@ -172,17 +172,3 @@ export function relatorio(registros, opcoes = {}) {
   return out;
 }
 
-// Portfólio aleatório de k jogos: acertos médios e média do melhor jogo.
-export function portfolioAleatorio(k, { sorteios = 20000, semente = 21 } = {}) {
-  const r = rng(semente);
-  let somaMedia = 0, somaMelhor = 0;
-  const base = Array.from({ length: 25 }, (_, i) => i + 1);
-  const sorteia = () => { const a = [...base]; for (let i = 0; i < 15; i++) { const j = i + Math.floor(r() * (25 - i)); [a[i], a[j]] = [a[j], a[i]]; } return new Set(a.slice(0, 15)); };
-  for (let s = 0; s < sorteios; s++) {
-    const d = sorteia();
-    let soma = 0, melhor = 0;
-    for (let j = 0; j < k; j++) { const g = sorteia(); let h = 0; for (const x of g) if (d.has(x)) h++; soma += h; melhor = Math.max(melhor, h); }
-    somaMedia += soma / k; somaMelhor += melhor;
-  }
-  return { media: somaMedia / sorteios, melhor: somaMelhor / sorteios };
-}

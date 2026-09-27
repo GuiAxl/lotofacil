@@ -7,7 +7,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { T, Chip } from "./ui/base.jsx";
 import { carregar, salvar, estadoInicial, montarConcursos, aplicarCorrecoes, pct } from "./ui/estado.js";
 import { simular, MOTORES } from "./estatistica/motor.js";
-import { criarHipotese, registrarNoDiario } from "./estatistica/laboratorio.js";
+import { criarHipotese, registrarNoDiario, validarPrevisao } from "./estatistica/laboratorio.js";
 import AbaConcurso from "./ui/AbaConcurso.jsx";
 import AbaHistorico from "./ui/AbaHistorico.jsx";
 import AbaSinais from "./ui/AbaSinais.jsx";
@@ -84,9 +84,12 @@ export default function App() {
     // fica congelada; novas tentativas para o mesmo par são ignoradas.
     registrarDiario: async (concurso, porMotor) => {
       const registros = await Promise.all(Object.keys(MOTORES).map(m => registrarNoDiario({ concurso, motor: m, jogo: porMotor[m].jogo, pesoAstral: porMotor.astral.pesoAstral, probs: m === "astral" ? porMotor.astral.valores : null, manifesto: manifesto(m) })));
-      atualizar(a => ({ diario: [...a.diario, ...registros.filter(r => !a.diario.some(d => d.concurso === r.concurso && d.motor === r.motor))] }));
+      // Validação antes do arquivamento: jogo com 15 dezenas distintas e universo de probabilidades somando 15.
+      const validos = registros.filter(r => !validarPrevisao({ jogo: r.jogo, probs: r.probs ? [0, ...r.probs] : null }).length);
+      atualizar(a => ({ diario: [...a.diario, ...validos.filter(r => !a.diario.some(d => d.concurso === r.concurso && d.motor === r.motor))] }));
     },
     registrarDiarioMotor: async (concurso, motor, jogo, probs = null) => {
+      if (validarPrevisao({ jogo, probs }).length) return;
       const r = await registrarNoDiario({ concurso, motor, jogo, probs, manifesto: manifesto(motor) });
       atualizar(a => (a.diario.some(d => d.concurso === concurso && d.motor === motor) ? {} : { diario: [...a.diario, r] }));
     },

@@ -84,7 +84,6 @@ export default function AbaPlacar({ app, concursos, simulacao, calculando }) {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
                 <Metrica rotulo="p · ganho de informação" valor={dec(perm.p.ganhoPerda, 3)} tom={perm.p.ganhoPerda < 0.05 ? "bom" : undefined} detalhe="principal" />
                 <Metrica rotulo="p · acertos Astral" valor={dec(perm.p.astral, 3)} tom={perm.p.astral < 0.05 ? "bom" : undefined} />
-                <Metrica rotulo="p · acertos Legado v12" valor={dec(perm.p.legado, 3)} tom={perm.p.legado < 0.05 ? "bom" : undefined} />
               </div>
             )}
           </Card>

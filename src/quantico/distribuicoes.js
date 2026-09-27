@@ -46,7 +46,6 @@ export const pNormalBicaudal = z => 2 * (1 - phi(Math.abs(z)));
 const LOG_FAT = [0];
 export const logFat = n => { for (let i = LOG_FAT.length; i <= n; i++) LOG_FAT[i] = LOG_FAT[i - 1] + Math.log(i); return LOG_FAT[n]; };
 export const comb = (n, k) => (k < 0 || k > n ? 0 : Math.exp(logFat(n) - logFat(k) - logFat(n - k)));
-export const TOTAL_COMBINACOES = 3268760; // C(25,15)
 
 // P(exatamente k acertos) para um jogo de m números (15 a 20) contra o sorteio de 15.
 export const pAcertos = (k, m = 15) => (comb(m, k) * comb(25 - m, 15 - k)) / comb(25, 15);

@@ -10,11 +10,10 @@ Documentação: [`docs/V13.md`](docs/V13.md).
 - `test/` — testes (`npm test`)
 - `dist/` — arquivo único gerado por `npm run build`
 - `versoes/` — os arquivos originais v1, v3, v4 e v12
-- `docs/ANALISE.md` e `auditoria/` — auditoria do v12
+- `docs/ANALISE.md` — auditoria do v12 (resultado registrado)
 
 ```bash
 npm install
 npm test
 npm run build
-npm run auditoria   # reaudita o motor do v12 (~4 min)
 ```

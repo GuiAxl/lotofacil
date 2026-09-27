@@ -178,7 +178,7 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
           { id: "tot", titulo: "Vantagem acumulada", alinhar: "right", mono: true, render: l => (l.vantagemTotal == null ? "—" : `${l.vantagemTotal >= 0 ? "+" : ""}${dec(l.vantagemTotal, 1)} nats`) },
           { id: "peso", titulo: "Peso hoje", alinhar: "right", mono: true, render: l => pct(prox.familias[l.familia] || 0, 1) },
         ]} linhas={gov.map(g => ({ ...g, __id: g.familia }))} />
-        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: pior que o acaso.</div>
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: mais de 2 nats pior que o acaso, fora da mistura, aprendendo em sombra até melhorar ("evolui ou sai").</div>
       </Card>
 
       <Card titulo="Comparação com baselines permanentes">
