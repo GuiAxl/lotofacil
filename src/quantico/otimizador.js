@@ -29,53 +29,141 @@ export function retornoEsperado(jogo, { modelo, ultimo, preco }) {
   return { valor, porReal: valor / preco, porFaixa, tabela, ...pop };
 }
 
-export function gerarJogos(opcoes) {
-  const {
-    quantidade = 5, modelo, ultimo, probs = null, confianca = 0,
-    fixos = [], excluidos = [], sobreposicaoMax = 10, iteracoes = 30000, semente = Date.now() % 1e9,
-  } = opcoes;
-  const r = rng(semente);
+// Problema de otimização do portfólio: energia de cada jogo (popularidade,
+// traços fora do observado e, se o motor tiver confiança, probabilidades) +
+// penalidade de sobreposição entre jogos.
+function montarProblema({ modelo, ultimo, probs = null, confianca = 0, fixos = [], excluidos = [], sobreposicaoMax = 10, quantidade }) {
   const livres = Array.from({ length: 25 }, (_, i) => i + 1).filter(n => !fixos.includes(n) && !excluidos.includes(n));
   if (fixos.length > 15 || fixos.length + livres.length < 15) throw new Error("Combinação de fixos/excluídos impossível");
-  const novoJogo = () => [...fixos, ...embaralhar(livres, r).slice(0, 15 - fixos.length)].sort((a, b) => a - b);
-  // Peso do motor preditivo: proporcional à confiança dele (0 se for acaso).
   const pesoMotor = probs ? Math.max(0, confianca - 0.5) * 2 : 0;
+  const cache = new Map();
   const energiaJogo = jogo => {
+    const m = mascara(jogo);
+    if (cache.has(m)) return cache.get(m);
     const pop = avaliarPopularidade(modelo, jogo, ultimo);
     let e = Math.log(pop.indice) + 0.5 * pop.tracosFora;
     if (pesoMotor) for (const n of jogo) e -= pesoMotor * Math.log(probs[n] / 0.6) * 3;
+    if (cache.size > 200000) cache.clear();
+    cache.set(m, e);
     return e;
   };
-  const penalSobreposicao = (a, b) => Math.max(0, popcount(a & b) - sobreposicaoMax);
+  const sobre = (a, b) => 0.3 * Math.max(0, popcount(a & b) - sobreposicaoMax);
+  return { livres, fixos, quantidade, energiaJogo, sobre };
+}
 
-  let jogos = Array.from({ length: quantidade }, novoJogo);
-  let mascaras = jogos.map(mascara);
-  let ej = jogos.map(energiaJogo);
-  const energiaTotal = () => {
-    let e = ej.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < quantidade; i++) for (let j = i + 1; j < quantidade; j++) e += 0.3 * penalSobreposicao(mascaras[i], mascaras[j]);
-    return e;
-  };
-  let E = energiaTotal();
-  let melhor = { jogos: jogos.map(j => [...j]), E };
+function portfolioInicial(pb, r) {
+  return Array.from({ length: pb.quantidade }, () => [...pb.fixos, ...embaralhar(pb.livres, r).slice(0, 15 - pb.fixos.length)].sort((a, b) => a - b));
+}
+function energiaPortfolio(pb, jogos) {
+  const ms = jogos.map(mascara);
+  let e = jogos.reduce((a, j) => a + pb.energiaJogo(j), 0);
+  for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++) e += pb.sobre(ms[i], ms[j]);
+  return e;
+}
+function propor(pb, jogos, g, r) {
+  const trocaveis = jogos[g].filter(n => !pb.fixos.includes(n));
+  const fora = pb.livres.filter(n => !jogos[g].includes(n));
+  if (!trocaveis.length || !fora.length) return null;
+  const sai = trocaveis[Math.floor(r() * trocaveis.length)], entra = fora[Math.floor(r() * fora.length)];
+  return jogos[g].map(n => (n === sai ? entra : n)).sort((a, b) => a - b);
+}
+function deltaClassico(pb, jogos, ms, g, novo) {
+  const mNovo = mascara(novo);
+  let d = pb.energiaJogo(novo) - pb.energiaJogo(jogos[g]);
+  for (let j = 0; j < jogos.length; j++) if (j !== g) d += pb.sobre(mNovo, ms[j]) - pb.sobre(ms[g], ms[j]);
+  return d;
+}
+
+// Recozimento simulado clássico.
+function recozimentoClassico(pb, { iteracoes, r }) {
+  const jogos = portfolioInicial(pb, r), ms = jogos.map(mascara);
+  let E = energiaPortfolio(pb, jogos), melhor = { jogos: jogos.map(j => [...j]), E };
   const T0 = 0.5, T1 = 0.002;
   for (let it = 0; it < iteracoes; it++) {
     const T = T0 * (T1 / T0) ** (it / iteracoes);
-    const g = Math.floor(r() * quantidade);
-    const trocaveis = jogos[g].filter(n => !fixos.includes(n));
-    const fora = livres.filter(n => !jogos[g].includes(n));
-    if (!trocaveis.length || !fora.length) continue;
-    const sai = trocaveis[Math.floor(r() * trocaveis.length)], entra = fora[Math.floor(r() * fora.length)];
-    const novo = jogos[g].map(n => (n === sai ? entra : n)).sort((a, b) => a - b);
-    const mNovo = mascara(novo), eNovo = energiaJogo(novo);
-    let delta = eNovo - ej[g];
-    for (let j = 0; j < quantidade; j++) if (j !== g) delta += 0.3 * (penalSobreposicao(mNovo, mascaras[j]) - penalSobreposicao(mascaras[g], mascaras[j]));
-    if (delta <= 0 || r() < Math.exp(-delta / T)) {
-      jogos[g] = novo; mascaras[g] = mNovo; ej[g] = eNovo; E += delta;
+    const g = Math.floor(r() * pb.quantidade), novo = propor(pb, jogos, g, r);
+    if (!novo) continue;
+    const d = deltaClassico(pb, jogos, ms, g, novo);
+    if (d <= 0 || r() < Math.exp(-d / T)) {
+      jogos[g] = novo; ms[g] = mascara(novo); E += d;
       if (E < melhor.E - 1e-12) melhor = { jogos: jogos.map(j => [...j]), E };
     }
   }
-  return melhor.jogos;
+  return melhor;
+}
+
+// Annealing quântico simulado (Monte Carlo de integral de caminho,
+// decomposição de Suzuki-Trotter): P réplicas do portfólio formam uma "fatia
+// de tempo imaginário" cada; réplicas vizinhas são acopladas por
+// J⊥ = −(P·T/2)·ln tanh(Γ/(P·T)), onde Γ é o campo transversal. Com Γ alto as
+// réplicas exploram livremente (tunelamento); Γ → 0 faz todas convergirem.
+// O acoplamento conta a concordância de spins entre as réplicas:
+// Σ sᵢsᵢ' = 4·(dezenas em comum) − 35 por jogo.
+function annealingQuantico(pb, { iteracoes, r, replicas = 8, T = 0.001, gama0 = 1, gama1 = 0.002 }) {
+  const P = replicas;
+  const reps = Array.from({ length: P }, () => portfolioInicial(pb, r));
+  const ms = reps.map(j => j.map(mascara));
+  const Ec = reps.map(j => energiaPortfolio(pb, j));
+  let melhor = { jogos: reps[0].map(j => [...j]), E: Ec[0] };
+  Ec.forEach((e, p) => { if (e < melhor.E) melhor = { jogos: reps[p].map(j => [...j]), E: e }; });
+  const concordancia = (a, b) => 4 * popcount(a & b) - 35;
+  const passos = Math.max(1, iteracoes);
+  for (let it = 0; it < passos; it++) {
+    const gama = gama0 * (gama1 / gama0) ** (it / passos);
+    const Jp = -(P * T / 2) * Math.log(Math.tanh(gama / (P * T)));
+    for (let p = 0; p < P; p++) {
+      const g = Math.floor(r() * pb.quantidade), novo = propor(pb, reps[p], g, r);
+      if (!novo) continue;
+      const mNovo = mascara(novo);
+      const dC = deltaClassico(pb, reps[p], ms[p], g, novo);
+      const ant = (p - 1 + P) % P, prox = (p + 1) % P;
+      const dQ = -Jp * (concordancia(mNovo, ms[ant][g]) + concordancia(mNovo, ms[prox][g]) - concordancia(ms[p][g], ms[ant][g]) - concordancia(ms[p][g], ms[prox][g]));
+      const d = dC / P + dQ;
+      if (d <= 0 || r() < Math.exp(-d / T)) {
+        reps[p][g] = novo; ms[p][g] = mNovo; Ec[p] += dC;
+        if (Ec[p] < melhor.E - 1e-12) melhor = { jogos: reps[p].map(j => [...j]), E: Ec[p] };
+      }
+    }
+  }
+  return polir(pb, melhor);
+}
+
+// Polimento final: descida gulosa (melhor troca de uma dezena) até não haver melhoria.
+function polir(pb, { jogos, E }) {
+  jogos = jogos.map(j => [...j]);
+  const ms = jogos.map(mascara);
+  for (let volta = 0; volta < 50; volta++) {
+    let melhorD = -1e-12, melhorMov = null;
+    for (let g = 0; g < jogos.length; g++) for (const sai of jogos[g]) {
+      if (pb.fixos.includes(sai)) continue;
+      for (const entra of pb.livres) {
+        if (jogos[g].includes(entra)) continue;
+        const novo = jogos[g].map(n => (n === sai ? entra : n)).sort((a, b) => a - b);
+        const d = deltaClassico(pb, jogos, ms, g, novo);
+        if (d < melhorD) { melhorD = d; melhorMov = { g, novo }; }
+      }
+    }
+    if (!melhorMov) break;
+    jogos[melhorMov.g] = melhorMov.novo; ms[melhorMov.g] = mascara(melhorMov.novo); E += melhorD;
+  }
+  return { jogos, E };
+}
+
+// Gera o portfólio. metodo: "quantico" (padrão), "classico" ou "ambos" (roda
+// os dois e fica com a menor energia).
+export function gerarPortfolio(opcoes) {
+  const { quantidade = 5, iteracoes = 30000, semente = Date.now() % 1e9, metodo = "ambos" } = opcoes;
+  const pb = montarProblema({ ...opcoes, quantidade });
+  const resultados = {};
+  if (metodo !== "classico") resultados.quantico = annealingQuantico(pb, { iteracoes: Math.round(iteracoes / 4), r: rng(semente), ...(opcoes.sqa || {}) });
+  if (metodo !== "quantico") resultados.classico = polir(pb, recozimentoClassico(pb, { iteracoes, r: rng(semente + 1) }));
+  const [vencedor, res] = Object.entries(resultados).sort((a, b) => a[1].E - b[1].E)[0];
+  return { jogos: res.jogos, energia: res.E, metodo: vencedor, energias: Object.fromEntries(Object.entries(resultados).map(([k, v]) => [k, v.E])) };
+}
+
+// Compatibilidade: devolve só os jogos (recozimento clássico).
+export function gerarJogos(opcoes) {
+  return gerarPortfolio({ ...opcoes, metodo: "classico" }).jogos;
 }
 
 // Monte Carlo do conjunto: chance de algum prêmio e distribuição do melhor jogo.

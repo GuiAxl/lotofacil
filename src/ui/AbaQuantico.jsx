@@ -4,9 +4,9 @@ import { T, Card, Botao, Chip, Rotulo, Bolinhas, BarrasProbabilidade, Tabela, Av
 import { parseNumeros, pct, dec, formatarNum, estimarProximo } from "./estado.js";
 import { HISTORICO } from "../dados/historico.js";
 import { gerarLaudo } from "../quantico/laudo.js";
-import { simular, prever, testeTemporal, scannerAblacao, governanca, contrafactual, explicarDezena, explicarEscolha, redundanciaFamilias, resumoMudancas, FAMILIAS, FAMILIAS_SINAL, BASELINES } from "../quantico/motor.js";
+import { simularAsync, prever, testeTemporal, scannerAblacao, governanca, contrafactual, explicarDezena, explicarEscolha, redundanciaFamilias, resumoMudancas, inspecionar, FAMILIAS, FAMILIAS_SINAL, BASELINES } from "../quantico/motor.js";
 import { ajustarPopularidade, avaliarPopularidade, premioEsperado } from "../quantico/popularidade.js";
-import { gerarJogos, retornoEsperado, simularConjunto, fechamento } from "../quantico/otimizador.js";
+import { gerarPortfolio, retornoEsperado, simularConjunto, fechamento } from "../quantico/otimizador.js";
 import { media } from "../estatistica/matematica.js";
 import { relatorio } from "../estatistica/metricas.js";
 import Diagnostico from "./Diagnostico.jsx";
@@ -96,6 +96,56 @@ function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
   );
 }
 
+function PainelOmega({ ins }) {
+  const bz = ins.boltzmann;
+  const maxIdade = Math.max(1, ...ins.regimes.map(r => r.idade));
+  return (
+    <>
+      <Card titulo="Especialistas ativos">
+        <Tabela colunas={[
+          { id: "nome", titulo: "Especialista", render: l => <div><div>{l.familia === "evolucao" ? "🧬 " : ""}{l.nome}</div>{l.familia === "evolucao" && <div style={{ fontSize: 11, color: T.textMuted }}>criado no concurso {l.criadoEm}</div>}</div> },
+          { id: "peso", titulo: "Peso", alinhar: "right", mono: true, render: l => pct(l.peso, 1) },
+          { id: "vant", titulo: "Vantagem recente", alinhar: "right", mono: true, render: l => (l.familia === "nulo" ? "—" : `${l.vantagemRecente >= 0 ? "+" : ""}${dec(l.vantagemRecente, 2)} nats`) },
+          { id: "st", titulo: "", render: l => (l.quarentena ? <Chip tom="ruim">quarentena</Chip> : l.familia === "nulo" ? <Chip>referência</Chip> : l.vantagemRecente > 0 ? <Chip tom="bom">à frente</Chip> : <Chip>atrás</Chip>) },
+        ]} linhas={ins.especialistas.map((e, i) => ({ ...e, __id: i }))} />
+      </Card>
+      <Card titulo="Evolução genética">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>A cada 300 concursos, uma população de modelos é avaliada nos 450 concursos anteriores, cruza, sofre mutação e só é promovida se também vencer o acaso nos 150 seguintes (validação nunca usada na seleção). No máximo 4 evoluídos vivos; os piores ou em quarentena saem.</div>
+        <Tabela vazio="O primeiro ciclo acontece a partir do concurso 600 do replay." colunas={[
+          { id: "concurso", titulo: "Ciclo", mono: true },
+          { id: "avaliados", titulo: "Genomas", alinhar: "right", mono: true },
+          { id: "melhor", titulo: "Melhor no treino", render: l => <div><div style={{ fontFamily: T.mono, fontSize: 11.5 }}>{l.melhor.nome}</div><div style={{ fontSize: 11, color: T.textMuted }}>treino {dec(l.melhor.treino * 1000, 2)} · validação {dec(l.melhor.validacao * 1000, 2)} milinats</div></div> },
+          { id: "prom", titulo: "Promovidos", render: l => (l.promovidos.length ? l.promovidos.map(p => <div key={p.nome} style={{ fontFamily: T.mono, fontSize: 11, color: T.bom }}>+ {p.nome}</div>) : <span style={{ color: T.textMuted }}>nenhum passou</span>) },
+          { id: "rem", titulo: "Removidos", render: l => (l.removidos.length ? l.removidos.map(p => <div key={p} style={{ fontFamily: T.mono, fontSize: 11, color: T.ruim }}>− {p}</div>) : "—") },
+        ]} linhas={ins.evolucoes.slice().reverse().map((e, i) => ({ ...e, __id: i }))} />
+      </Card>
+      <Card titulo="Máquina de Boltzmann (modelo de Ising)">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>Cada acoplamento só "acende" quando passa num teste de evidência online (|z| &gt; 3√n). Acoplamento positivo = as dezenas tendem a sair juntas; temporal = uma dezena no sorteio anterior muda a chance de outra no atual.</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <Metrica rotulo="Acoplamentos entre dezenas" valor={bz ? bz.nJ : "—"} detalhe="de 300 possíveis" />
+          <Metrica rotulo="Acoplamentos temporais" valor={bz ? bz.nK : "—"} detalhe="de 625 possíveis" />
+        </div>
+        {bz && (bz.nJ + bz.nK === 0
+          ? <Aviso tom="info">Nenhuma interação passou no teste: no histórico, nenhuma dupla de dezenas sai junta (ou se evita), e nenhuma dezena influencia o sorteio seguinte, além do acaso.</Aviso>
+          : <Tabela colunas={[
+            { id: "tipo", titulo: "Tipo" }, { id: "desc", titulo: "Dezenas", mono: true }, { id: "valor", titulo: "Força", alinhar: "right", mono: true, render: l => `${l.valor >= 0 ? "+" : ""}${dec(l.valor, 3)}` },
+          ]} linhas={[...bz.J.map((j, i) => ({ __id: `j${i}`, tipo: "mesmo sorteio", desc: `${formatarNum(j.a)} ↔ ${formatarNum(j.b)}`, valor: j.valor })), ...bz.K.map((k, i) => ({ __id: `k${i}`, tipo: "sorteio anterior → atual", desc: `${formatarNum(k.de)} → ${formatarNum(k.para)}`, valor: k.valor }))]} />)}
+      </Card>
+      <Card titulo="Regimes por dezena (BOCPD)">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>Idade estimada do comportamento atual de cada dezena (em concursos, até 300). Barra curta = o detector acredita que a dezena mudou de comportamento recentemente.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, alignItems: "end", height: 90 }}>
+          {ins.regimes.map(r => <div key={r.numero} title={`nº ${formatarNum(r.numero)}: regime com ~${Math.round(r.idade)} concursos`} style={{ height: `${(r.idade / maxIdade) * 100}%`, background: r.idade < 0.7 * maxIdade ? T.serie2 : T.serie1, borderRadius: "3px 3px 0 0" }} />)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, marginTop: 3 }}>{ins.regimes.map(r => <div key={r.numero} style={{ textAlign: "center", fontFamily: T.mono, fontSize: 9.5, color: T.textMuted }}>{formatarNum(r.numero)}</div>)}</div>
+        <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11.5, color: T.textSoft, flexWrap: "wrap" }}>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie2, borderRadius: 2, marginRight: 5 }} />regime jovem (mudou há pouco)</span>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie1, borderRadius: 2, marginRight: 5 }} />regime estável</span>
+        </div>
+      </Card>
+    </>
+  );
+}
+
 function Previsao({ sorteios, concursos, proximo, acoes }) {
   const [ativas, setAtivas] = useState(() => new Set(FAMILIAS_SINAL));
   const [base, setBase] = useState(null);      // motor completo
@@ -106,12 +156,25 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   const [prog, setProg] = useState(null);
   const [dezena, setDezena] = useState(null);
   const [registrado, setRegistrado] = useState(false);
-  useEffect(() => { setBase(null); setConfig(null); const t = setTimeout(() => setBase(simular(sorteios, { concursos })), 50); return () => clearTimeout(t); }, [sorteios]);
+  const [carga, setCarga] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    setBase(null); setConfig(null); setCarga([0, sorteios.length]);
+    simularAsync(sorteios, { concursos, onProgresso: (a, b) => vivo && setCarga([a, b]) }).then(r => { if (vivo) { setBase(r); setCarga(null); } });
+    return () => { vivo = false; };
+  }, [sorteios]);
+  const inspecao = useMemo(() => (config || base ? inspecionar(config || base) : null), [config, base]);
   const atual = config || base;
   const rel = useMemo(() => (atual ? relatorio(atual.registros) : null), [atual]);
   const redundancia = useMemo(() => (atual ? redundanciaFamilias(atual) : null), [atual]);
   const mudancas = useMemo(() => (atual ? resumoMudancas(atual) : null), [atual]);
-  if (!atual) return <Card><div style={{ color: T.textSoft }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
+  if (!atual) return (
+    <Card titulo="Treinando o Motor Ω">
+      <div style={{ color: T.textSoft, fontSize: 13, marginBottom: 10 }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos: banco de características, BOCPD, máquina de Boltzmann, rede neural e ciclos de evolução genética, cada concurso previsto só com o passado.</div>
+      {carga && <div style={{ height: 8, background: T.surface2, borderRadius: 4 }}><div style={{ width: `${(carga[0] / carga[1]) * 100}%`, height: "100%", background: T.gold, borderRadius: 4, transition: "width .2s" }} /></div>}
+      {carga && <div style={{ fontSize: 12, color: T.textMuted, marginTop: 6, fontFamily: T.mono }}>{carga[0].toLocaleString("pt-BR")} / {carga[1].toLocaleString("pt-BR")}</div>}
+    </Card>
+  );
 
   const prox = prever(atual.estado);
   const gov = governanca(atual.estado);
@@ -121,12 +184,11 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
     const xs = atual.acertos.slice(i, i + 500), m = media(xs);
     blocos.push({ __id: i, de: concursos[200 + i], ate: concursos[Math.min(200 + i + 499, concursos.length - 1)], media: m, z: (m - 9) / (0.949 / Math.sqrt(xs.length)) });
   }
-  const aplicar = () => {
+  const aplicar = async () => {
+    if (ativas.size === FAMILIAS_SINAL.length) { setConfig(null); return; }
     setCalculando(true);
-    setTimeout(() => {
-      setConfig(ativas.size === FAMILIAS_SINAL.length ? null : simular(sorteios, { concursos, familiasAtivas: ativas }));
-      setCalculando(false);
-    }, 30);
+    setConfig(await simularAsync(sorteios, { concursos, familiasAtivas: ativas }));
+    setCalculando(false);
   };
   const rodarPerm = async n => { setPerm(null); setProg(["perm", 0, n]); const r = await testeTemporal(sorteios, { n, onProgresso: (i, t) => setProg(["perm", i, t]) }); setPerm(r); setProg(null); };
   const rodarScan = async () => { setScan(null); setProg(["scan", 0, FAMILIAS_SINAL.length]); const r = await scannerAblacao(sorteios, { onProgresso: (i, t) => setProg(["scan", i, t]) }); setScan(r); setProg(null); };
@@ -134,11 +196,13 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
 
   return (
     <>
-      <Card titulo="Motor preditivo" acao={config ? <Chip tom="alerta">configuração de teste ativa</Chip> : null}>
+      <Card titulo="Motor Ω" acao={config ? <Chip tom="alerta">configuração de teste ativa</Chip> : null}>
         <div style={{ fontSize: 13, color: T.textSoft, lineHeight: 1.55, marginBottom: 12 }}>
-          {FAMILIAS_SINAL.length} famílias de sinais (frequência, tendência, memória, Markov, pares, similaridade KNN, estrutura do volante e todas juntas) competem numa
-          mistura bayesiana contra o <b style={{ color: T.goldText }}>modelo nulo</b>. Replay <i>test-then-learn</i>: cada concurso é previsto só com o passado e depois entra
-          no aprendizado. O desempenho antigo é esquecido aos poucos (meia-vida ≈ 350 concursos).
+          Banco de 26 características em z-score, <b style={{ color: T.goldText }}>detecção bayesiana de mudança de regime</b> (BOCPD) por dezena,
+          <b style={{ color: T.goldText }}> máquina de Boltzmann dinâmica</b> (modelo de Ising: interações entre dezenas e de um sorteio para o seguinte),
+          <b style={{ color: T.goldText }}> rede neural online</b> e <b style={{ color: T.goldText }}>especialistas criados por evolução genética</b>, promovidos só se
+          passarem na validação fora da amostra. Tudo combinado por meta-aprendizado <i>Fixed-Share</i> contra o modelo nulo, com quarentena automática de quem
+          fica pior que o acaso. Cada concurso é previsto só com o passado.
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Metrica rotulo="Confiança em padrões hoje" valor={pct(prox.confianca)} detalhe="50% = não sei; perto de 100% = padrão forte" tom={prox.confianca > 0.9 ? "bom" : undefined} />
@@ -180,6 +244,8 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
         ]} linhas={gov.map(g => ({ ...g, __id: g.familia }))} />
         <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: mais de 2 nats pior que o acaso, fora da mistura, aprendendo em sombra até melhorar ("evolui ou sai").</div>
       </Card>
+
+      {inspecao && <PainelOmega ins={inspecao} />}
 
       <Card titulo="Comparação com baselines permanentes">
         <Tabela colunas={[
@@ -360,7 +426,7 @@ function Popularidade({ modelo, ultimo }) {
 }
 
 function Gerador({ modelo, ultimo, previsaoMotor }) {
-  const [cfg, setCfg] = useState({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "" });
+  const [cfg, setCfg] = useState({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "", metodo: "ambos" });
   const [res, setRes] = useState(null);
   const [rodando, setRodando] = useState(false);
   const preco = Number(cfg.preco.replace(",", ".")) || 3.5;
@@ -370,14 +436,15 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
       try {
         // Seed registrado: a mesma seed + mesma configuração + mesmo histórico = mesmos jogos.
         const semente = Number(cfg.semente) || Math.floor(Math.random() * 1e9);
-        const jogos = gerarJogos({
-          semente,
+        const port = gerarPortfolio({
+          semente, metodo: cfg.metodo,
           quantidade: Math.min(50, Math.max(1, Number(cfg.quantidade) || 5)), modelo, ultimo,
           fixos: parseNumeros(cfg.fixos), excluidos: parseNumeros(cfg.excluidos), sobreposicaoMax: Number(cfg.sobreposicao) || 10,
           probs: cfg.usarMotor ? previsaoMotor?.probs : null, confianca: cfg.usarMotor ? previsaoMotor?.confianca : 0,
         });
+        const jogos = port.jogos;
         const avaliados = jogos.map(j => ({ jogo: j, ...retornoEsperado(j, { modelo, ultimo, preco }) }));
-        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente });
+        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente, metodo: port.metodo, energias: port.energias });
       } catch (e) { setRes({ erro: e.message }); }
       setRodando(false);
     }, 30);
@@ -385,10 +452,11 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
   const referencia = useMemo(() => retornoEsperado([3, 6, 7, 9, 12, 13, 14, 16, 17, 18, 19, 21, 22, 24, 25], { modelo, ultimo, preco }), [modelo, ultimo, preco]);
   return (
     <>
-      <Card titulo="Gerador por recozimento simulado">
+      <Card titulo="Gerador · annealing quântico">
         <div style={{ fontSize: 13, color: T.textSoft, lineHeight: 1.55, marginBottom: 12 }}>
           Busca, entre milhões de combinações, jogos com <b style={{ color: T.goldText }}>baixa popularidade</b> (prêmio dividido com menos gente) e pouco sobrepostos entre si.
-          O método é o recozimento simulado, a versão clássica do annealing quântico: aceita pioras no começo para escapar de mínimos locais e vai "esfriando" até convergir.
+          O otimizador principal é o <b style={{ color: T.goldText }}>annealing quântico simulado</b> (Monte Carlo de integral de caminho): 8 réplicas do portfólio acopladas por um
+          campo transversal que diminui aos poucos, o que permite "tunelar" entre soluções. Ele concorre com o recozimento clássico e fica o de menor energia.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
           <div><Rotulo>Quantidade de jogos</Rotulo><input style={estiloInput} value={cfg.quantidade} onChange={e => setCfg({ ...cfg, quantidade: e.target.value.replace(/\D/g, "") })} /></div>
@@ -396,6 +464,13 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           <div><Rotulo>Excluídos</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.excluidos} placeholder="ex.: 1 25" onChange={e => setCfg({ ...cfg, excluidos: e.target.value })} /></div>
           <div><Rotulo>Máx. dezenas em comum</Rotulo><input style={estiloInput} value={cfg.sobreposicao} onChange={e => setCfg({ ...cfg, sobreposicao: e.target.value.replace(/\D/g, "") })} /></div>
           <div><Rotulo>Preço da aposta (R$)</Rotulo><input style={estiloInput} value={cfg.preco} onChange={e => setCfg({ ...cfg, preco: e.target.value })} /></div>
+          <div><Rotulo>Otimizador</Rotulo>
+            <select style={estiloInput} value={cfg.metodo} onChange={e => setCfg({ ...cfg, metodo: e.target.value })}>
+              <option value="ambos">Quântico + clássico (melhor dos dois)</option>
+              <option value="quantico">Annealing quântico simulado</option>
+              <option value="classico">Recozimento clássico</option>
+            </select>
+          </div>
           <div><Rotulo>Seed (vazio = nova)</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.semente} placeholder="aleatória" onChange={e => setCfg({ ...cfg, semente: e.target.value.replace(/\D/g, "") })} /></div>
         </div>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 12, cursor: "pointer" }}>
@@ -429,7 +504,7 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
                 </div>
               </div>
             )}
-            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
+            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Otimizador vencedor: <b style={{ color: T.goldText }}>{res.metodo === "quantico" ? "annealing quântico simulado" : "recozimento clássico"}</b>{Object.keys(res.energias).length > 1 ? ` (energia quântico ${dec(res.energias.quantico, 3)} · clássico ${dec(res.energias.classico, 3)}; menor é melhor)` : ""}. Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
           </Card>
           <Card titulo="Jogos">
             {res.avaliados.map((a, i) => (
@@ -514,7 +589,7 @@ export default function AbaQuantico({ app, acoes }) {
   const ultimo = sorteios[sorteios.length - 1];
   const proximo = estimarProximo(app.resultados);
   const [previsaoMotor, setPrevisaoMotor] = useState(null);
-  useEffect(() => { if (secao === "gerador" && !previsaoMotor) setTimeout(() => setPrevisaoMotor(prever(simular(sorteios).estado)), 50); }, [secao]);
+  useEffect(() => { if (secao === "gerador" && !previsaoMotor) simularAsync(sorteios).then(r => setPrevisaoMotor(prever(r.estado))); }, [secao]);
 
   return (
     <>

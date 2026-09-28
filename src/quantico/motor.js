@@ -1,342 +1,278 @@
-// Motor Quântico (estatístico, sem astrologia).
+// Motor Ω (Quântico) — estatística pura, sem astrologia.
 //
-// Para cada concurso, calcula características de CADA dezena a partir só do
-// passado, agrupadas em famílias (frequência, tendência, memória, Markov,
-// pares, similaridade histórica, estrutura do volante). Cada família alimenta
-// modelos de regressão logística online (pesos compartilhados entre as 25
-// dezenas) que competem numa mistura bayesiana com o modelo nulo (60% para
-// todas). O desempenho antigo é esquecido aos poucos (meia-vida ≈ 350
-// concursos), então a mistura segue o que funciona AGORA.
-import { calibrarSoma15, logit, rng, embaralhar, top15 } from "../estatistica/matematica.js";
+// Arquitetura:
+//   banco de 26 características (z-scores teóricos, BOCPD por dezena)
+//     → especialistas: logística por família, rede neural online, regime
+//       (BOCPD), máquina de Boltzmann dinâmica (Ising) e especialistas
+//       EVOLUÍDOS por algoritmo genético com walk-forward aninhado
+//     → meta-aprendizado Fixed-Share (segue o melhor especialista mesmo com
+//       mudança de regime), com prior de 50% no acaso
+//     → "evolui ou sai": quarentena automática de quem fica > 2 nats pior
+//       que o acaso (segue aprendendo em sombra e pode voltar).
+// Tudo test-then-learn: cada concurso é previsto só com o passado.
+import { construirBanco, K, IDX, CARACTERISTICAS } from "./banco.js";
+import { nulo, logistico, neural, regime, boltzmann } from "./especialistas.js";
+import { evoluir, descreverGenoma } from "./evolucao.js";
+import { acoplamentosFortes } from "./boltzmann.js";
+import { rng, embaralhar, top15 } from "../estatistica/matematica.js";
 
-export const CARACTERISTICAS = [
-  { id: "f10", nome: "Frequência nos últimos 10" },
-  { id: "f30", nome: "Frequência nos últimos 30" },
-  { id: "f100", nome: "Frequência nos últimos 100" },
-  { id: "f500", nome: "Frequência nos últimos 500" },
-  { id: "fTudo", nome: "Frequência no histórico todo" },
-  { id: "ema", nome: "Média móvel exponencial" },
-  { id: "momentum", nome: "Momentum (EMA curta − EMA longa)" },
-  { id: "ultimo", nome: "Saiu no último concurso" },
-  { id: "atraso", nome: "Atraso (concursos sem sair)" },
-  { id: "sequencia", nome: "Sequência de presenças seguidas" },
-  { id: "markov1", nome: "Markov ordem 1 (transição da própria dezena)" },
-  { id: "markov2", nome: "Markov ordem 2 (últimos 2 estados)" },
-  { id: "hazard", nome: "Pressão do atraso (hazard empírico)" },
-  { id: "pares", nome: "Afinidade de pares com o último sorteio" },
-  { id: "knn", nome: "Similaridade histórica (KNN)" },
-  { id: "linha", nome: "Nível da linha do volante (últimos 20)" },
-  { id: "coluna", nome: "Nível da coluna do volante (últimos 20)" },
-];
-const IDX = Object.fromEntries(CARACTERISTICAS.map((c, i) => [c.id, i]));
-const K = CARACTERISTICAS.length;
-
+export { CARACTERISTICAS };
+const F = ids => ids.map(id => IDX[id]);
 export const FAMILIAS = [
-  { id: "nulo", nome: "Nulo (acaso puro, 60%)", usa: [] },
-  { id: "freqLonga", nome: "Frequência de longo prazo", usa: ["f500", "fTudo"] },
-  { id: "freqCurta", nome: "Frequência recente (\"quentes\")", usa: ["f10", "f30", "f100"] },
-  { id: "tendencia", nome: "Tendência (EMA, momentum)", usa: ["ema", "momentum"] },
-  { id: "memoria", nome: "Memória (último, atraso, sequência)", usa: ["ultimo", "atraso", "sequencia"] },
-  { id: "markov", nome: "Markov e hazard", usa: ["markov1", "markov2", "hazard"] },
-  { id: "pares", nome: "Pares", usa: ["pares"] },
-  { id: "similaridade", nome: "Similaridade histórica (KNN)", usa: ["knn"] },
-  { id: "volante", nome: "Estrutura do volante (linha, coluna)", usa: ["linha", "coluna"] },
-  { id: "todos", nome: "Todas as características", usa: CARACTERISTICAS.map(c => c.id) },
+  { id: "nulo", nome: "Nulo (acaso puro, 60%)" },
+  { id: "freqLonga", nome: "Frequência de longo prazo", feats: F(["z500", "zTudo"]) },
+  { id: "freqCurta", nome: "Frequência recente (\"quentes\")", feats: F(["z5", "z10", "z20", "z50", "z100"]) },
+  { id: "tendencia", nome: "Tendência (EMAs, momentum)", feats: F(["ema05", "ema10", "ema20", "momentum"]) },
+  { id: "memoria", nome: "Memória (último, atraso, sequência)", feats: F(["ultimo", "penultimo", "atraso", "atrasoRaro", "sequencia"]) },
+  { id: "markov", nome: "Markov e hazard", feats: F(["markov1", "markov2", "hazard"]) },
+  { id: "pares", nome: "Pares e vizinhança", feats: F(["pares", "vizinhos"]) },
+  { id: "similaridade", nome: "Similaridade histórica (KNN)", feats: F(["knn"]) },
+  { id: "volante", nome: "Estrutura do volante", feats: F(["linha", "coluna"]) },
+  { id: "todos", nome: "Logística com todas as características", feats: CARACTERISTICAS.map((_, i) => i) },
+  { id: "regime", nome: "Regimes (BOCPD)" },
+  { id: "boltzmann", nome: "Máquina de Boltzmann (Ising)" },
+  { id: "neural", nome: "Rede neural online" },
+  { id: "evolucao", nome: "Especialistas evoluídos (genético)" },
 ];
-export const FAMILIAS_SINAL = FAMILIAS.filter(f => f.usa.length).map(f => f.id);
-const TAXAS = [0.003, 0.02];
+export const FAMILIAS_SINAL = FAMILIAS.filter(f => f.id !== "nulo").map(f => f.id);
+export const BASELINES = { aleatorio: "Aleatório", frequencia: "Frequência simples (histórico todo)", bayes: "Frequência recente (200)", markov: "Markov simples (ordem 1)" };
+
 export const ESQUECIMENTO = 0.998;
-// "Evolui ou sai": modelo que, no desempenho recente, fica mais de 2 nats
-// (fator de Bayes > 7) PIOR que o acaso sai da mistura. Continua aprendendo
-// em sombra e volta sozinho quando deixa de ser pior que o acaso.
 export const LIMITE_QUARENTENA = 2;
-export const emQuarentena = (estado, m) => {
-  if (m.nulo) return false;
-  const nulo = estado.modelos.find(x => x.nulo);
-  return m.perda - nulo.perda > LIMITE_QUARENTENA;
+const ALFA_FIXED_SHARE = 0.002;
+const PASSO_EVOLUCAO = 300, INICIO_EVOLUCAO = 600, MAX_EVOLUIDOS = 4;
+
+function perdaLog(p, s) {
+  let l = 0;
+  for (let n = 1; n <= 25; n++) { const q = Math.min(1 - 1e-9, Math.max(1e-9, p[n])); l -= s.has(n) ? Math.log(q) : Math.log(1 - q); }
+  return l;
+}
+
+export function criarEstado(familiasAtivas = null, ctx = { sorteios: [] }, banco = null) {
+  const ativa = id => id === "nulo" || !familiasAtivas || familiasAtivas.has(id);
+  const esp = [];
+  const add = (familia, nome, obj) => esp.push({ familia, nome, esp: obj, logw: 0, perda: 0, perdaTotal: 0, nulo: familia === "nulo", criadoEm: 0 });
+  for (const f of FAMILIAS) {
+    if (!ativa(f.id) || f.id === "evolucao") continue;
+    if (f.id === "nulo") add("nulo", f.nome, nulo());
+    else if (f.feats) add(f.id, f.nome, logistico(f.feats, f.id === "todos" ? { lr: 0.01, l2: 0.02 } : { lr: 0.03, l2: 0.001 }));
+    else if (f.id === "regime") add("regime", f.nome, regime());
+    else if (f.id === "boltzmann") add("boltzmann", f.nome, boltzmann(ctx));
+    else if (f.id === "neural") add("neural", f.nome, neural());
+  }
+  // Prior: 50% no acaso, 50% repartido entre os especialistas com sinal.
+  const M = esp.length;
+  esp.forEach(e => { e.logw = Math.log(e.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)); });
+  return { especialistas: esp, t: 0, ctx, banco, evolui: ativa("evolucao"), evolucoes: [] };
+}
+
+export const emQuarentena = (estado, e) => {
+  if (e.nulo) return false;
+  const n = estado.especialistas.find(x => x.nulo);
+  return e.perda - n.perda > LIMITE_QUARENTENA;
 };
-const JANELA_KNN = 1500, VIZINHOS_KNN = 40, MAX_GAP = 12;
 
-const popcount = x => { x -= (x >>> 1) & 0x55555555; x = (x & 0x33333333) + ((x >>> 2) & 0x33333333); return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24; };
-
-export function criarEstado(familiasAtivas = null) {
-  const ativa = f => !f.usa.length || !familiasAtivas || familiasAtivas.has(f.id);
-  return {
-    t: 0, historico: [], mascaras: [],
-    cont: new Float64Array(26), ultimoVisto: new Int32Array(26).fill(-1), seq: new Int32Array(26),
-    cooc: Array.from({ length: 26 }, () => new Float64Array(26)),
-    emaLenta: new Float64Array(26).fill(0.6), emaMedia: new Float64Array(26).fill(0.6), emaRapida: new Float64Array(26).fill(0.6),
-    // Markov por dezena: trans1[n][estadoAnterior] = [vezes, saiu]; trans2 com 4 estados.
-    trans1: Array.from({ length: 26 }, () => [[0, 0], [0, 0]]),
-    trans2: Array.from({ length: 26 }, () => [[0, 0], [0, 0], [0, 0], [0, 0]]),
-    hazard: Array.from({ length: MAX_GAP + 1 }, () => [0, 0]),
-    modelos: FAMILIAS.filter(ativa).flatMap(f => (f.usa.length
-      ? TAXAS.map(lr => ({ familia: f.id, lr, usa: f.usa.map(u => IDX[u]), w: new Float64Array(K + 1), g2: new Float64Array(K + 1).fill(1e-8), perda: 0, perdaTotal: 0 }))
-      : [{ familia: f.id, nulo: true, perda: 0, perdaTotal: 0 }])),
-  };
-}
-
-function freqJanela(estado, n, janela) {
-  const h = estado.historico, ini = Math.max(0, h.length - janela);
-  if (h.length - ini < 1) return 0;
-  let c = 0;
-  for (let i = ini; i < h.length; i++) if (h[i].has(n)) c++;
-  return c / (h.length - ini) - 0.6;
-}
-const taxaSuavizada = ([vezes, saiu], forca = 20) => (saiu + forca * 0.6) / (vezes + forca) - 0.6;
-const gapDe = (estado, n) => (estado.ultimoVisto[n] < 0 ? MAX_GAP : Math.min(MAX_GAP, estado.t - 1 - estado.ultimoVisto[n]));
-
-// Matriz 26 × K de características (linha n), escaladas para ordem ~1.
-export function caracteristicas(estado) {
-  const X = Array.from({ length: 26 }, () => new Float64Array(K));
-  const h = estado.historico, t = estado.t, ultimo = h[t - 1], penultimo = h[t - 2];
-
-  // KNN: concursos passados mais parecidos com o último; olha o que veio DEPOIS deles.
-  const knn = new Float64Array(26);
-  if (t > 60) {
-    const alvo = estado.mascaras[t - 1], cand = [];
-    for (let i = Math.max(0, t - 1 - JANELA_KNN); i < t - 1; i++) cand.push([popcount(estado.mascaras[i] & alvo), i]);
-    cand.sort((a, b) => b[0] - a[0]);
-    const viz = cand.slice(0, VIZINHOS_KNN);
-    for (const [, i] of viz) for (const n of h[i + 1]) knn[n]++;
-    for (let n = 1; n <= 25; n++) knn[n] = knn[n] / viz.length - 0.6;
-  }
-  // Linhas e colunas do volante nos últimos 20.
-  const linhaC = new Float64Array(5), colC = new Float64Array(5), j20 = Math.min(20, t);
-  for (let i = t - j20; i < t; i++) for (const n of h[i]) { linhaC[Math.floor((n - 1) / 5)]++; colC[(n - 1) % 5]++; }
-
-  for (let n = 1; n <= 25; n++) {
-    const x = X[n];
-    x[IDX.f10] = freqJanela(estado, n, 10) * 3;
-    x[IDX.f30] = freqJanela(estado, n, 30) * 5;
-    x[IDX.f100] = freqJanela(estado, n, 100) * 8;
-    x[IDX.f500] = freqJanela(estado, n, 500) * 15;
-    x[IDX.fTudo] = t ? (estado.cont[n] / t - 0.6) * 25 : 0;
-    x[IDX.ema] = (estado.emaMedia[n] - 0.6) * 5;
-    x[IDX.momentum] = (estado.emaRapida[n] - estado.emaLenta[n]) * 4;
-    x[IDX.ultimo] = ultimo ? (ultimo.has(n) ? 0.4 : -0.6) : 0;
-    x[IDX.atraso] = Math.log1p(estado.ultimoVisto[n] < 0 ? 0 : t - 1 - estado.ultimoVisto[n]) - 0.4;
-    x[IDX.sequencia] = Math.min(estado.seq[n], 10) / 3 - 0.8;
-    if (ultimo) x[IDX.markov1] = taxaSuavizada(estado.trans1[n][ultimo.has(n) ? 1 : 0]) * 10;
-    if (penultimo) x[IDX.markov2] = taxaSuavizada(estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)]) * 10;
-    if (t > 20) x[IDX.hazard] = taxaSuavizada(estado.hazard[gapDe(estado, n)], 50) * 10;
-    if (ultimo && t > 20) {
-      let s = 0, m = 0;
-      for (const j of ultimo) { if (j === n || !estado.cont[j]) continue; s += estado.cooc[n][j] / estado.cont[j] - 14 / 24; m++; }
-      x[IDX.pares] = m ? (s / m) * 20 : 0;
-    }
-    x[IDX.knn] = knn[n] * 6;
-    if (j20) {
-      x[IDX.linha] = (linhaC[Math.floor((n - 1) / 5)] / (j20 * 5) - 0.6) * 8;
-      x[IDX.coluna] = (colC[(n - 1) % 5] / (j20 * 5) - 0.6) * 8;
-    }
-  }
-  return X;
-}
-
-function probsModelo(mod, X) {
-  if (mod.nulo) return new Array(26).fill(0.6);
-  const s = [];
-  for (let n = 1; n <= 25; n++) {
-    let z = mod.w[K];
-    for (const k of mod.usa) z += mod.w[k] * X[n][k];
-    s.push(logit(0.6) + z);
-  }
-  return [0, ...calibrarSoma15(s)];
-}
-
-function perdaLog(p, sorteado) {
-  let s = 0;
-  for (let n = 1; n <= 25; n++) { const q = Math.min(1 - 1e-9, Math.max(1e-9, p[n])); s -= sorteado.has(n) ? Math.log(q) : Math.log(1 - q); }
-  return s;
-}
-
-// Prior: 50% para "é acaso" (nulo) e 50% repartido entre os modelos com padrão.
-// `excluir` remove uma família (contrafactual) e renormaliza.
 export function pesosMistura(estado, excluir = null) {
-  const ativos = estado.modelos.map(m => m.familia !== excluir && !emQuarentena(estado, m));
-  const M = ativos.filter(Boolean).length;
-  const min = Math.min(...estado.modelos.filter((_, i) => ativos[i]).map(m => m.perda));
-  const w = estado.modelos.map((m, i) => (ativos[i] ? (m.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)) * Math.exp(-(m.perda - min)) : 0));
-  const soma = w.reduce((a, b) => a + b, 0);
-  return w.map(x => x / soma);
+  const es = estado.especialistas;
+  const ok = es.map(e => e.familia !== excluir && !emQuarentena(estado, e));
+  const max = Math.max(...es.filter((_, i) => ok[i]).map(e => e.logw));
+  const w = es.map((e, i) => (ok[i] ? Math.exp(e.logw - max) : 0));
+  const s = w.reduce((a, b) => a + b, 0);
+  return w.map(x => x / s);
 }
 
 export function pesosPorFamilia(estado, excluir = null) {
-  const w = pesosMistura(estado, excluir), porFamilia = {};
-  estado.modelos.forEach((m, i) => { porFamilia[m.familia] = (porFamilia[m.familia] || 0) + w[i]; });
-  return porFamilia;
+  const w = pesosMistura(estado, excluir), out = {};
+  estado.especialistas.forEach((e, i) => { out[e.familia] = (out[e.familia] || 0) + w[i]; });
+  return out;
 }
 
-export function prever(estado, X = caracteristicas(estado), { excluir = null } = {}) {
+function previsoesIndividuais(estado, t) {
+  return estado.especialistas.map(e => e.esp.prever(estado.banco.X, t));
+}
+
+function combinar(estado, preds, excluir = null) {
   const pesos = pesosMistura(estado, excluir);
-  const p = new Array(26).fill(0);
-  const porFamilia = {};
-  estado.modelos.forEach((m, i) => {
-    if (pesos[i] < 1e-7) return;
-    const pm = probsModelo(m, X);
-    const f = (porFamilia[m.familia] ||= { peso: 0, p: new Array(26).fill(0) });
+  const p = new Array(26).fill(0), porFamilia = {};
+  estado.especialistas.forEach((e, i) => {
+    const f = (porFamilia[e.familia] ||= { peso: 0, p: new Array(26).fill(0) });
     f.peso += pesos[i];
-    for (let n = 1; n <= 25; n++) { p[n] += pesos[i] * pm[n]; f.p[n] += pesos[i] * pm[n]; }
+    if (pesos[i] < 1e-9) return;
+    for (let n = 1; n <= 25; n++) { p[n] += pesos[i] * preds[i][n]; f.p[n] += pesos[i] * preds[i][n]; }
   });
-  const familias = pesosPorFamilia(estado, excluir);
+  const familias = {};
+  for (const [f, v] of Object.entries(porFamilia)) familias[f] = v.peso;
   return { probs: p, jogo: top15(p), confianca: 1 - (familias.nulo || 0), familias, porFamilia };
 }
 
-// Quanto cada família empurra a probabilidade de uma dezena (soma = p − 60%).
+// Previsão do próximo concurso (linha t = estado.t do banco).
+export function prever(estado, { excluir = null } = {}) {
+  return combinar(estado, previsoesIndividuais(estado, estado.t), excluir);
+}
+
+// Aprende com o concurso t (depois de previsto): Fixed-Share + treino de cada especialista.
+function aprender(estado, t, preds) {
+  const s = estado.banco.conjuntos[t];
+  const es = estado.especialistas;
+  es.forEach((e, i) => {
+    const l = perdaLog(preds[i], s);
+    e.logw -= l;
+    e.perda = ESQUECIMENTO * e.perda + l;
+    e.perdaTotal += l;
+    e.esp.aprender(estado.banco.X, t, s, preds[i]);
+  });
+  // Fixed-Share (Herbster & Warmuth): mistura com o prior a cada passo, o que
+  // permite trocar rapidamente de especialista quando o regime muda.
+  const max = Math.max(...es.map(e => e.logw));
+  const w = es.map(e => Math.exp(e.logw - max));
+  const soma = w.reduce((a, b) => a + b, 0), M = es.length;
+  es.forEach((e, i) => {
+    const prior = e.nulo ? 0.5 : 0.5 / Math.max(1, M - 1);
+    e.logw = Math.log((1 - ALFA_FIXED_SHARE) * (w[i] / soma) + ALFA_FIXED_SHARE * prior);
+  });
+  estado.t = t + 1;
+}
+
+// Ciclo de evolução genética no concurso t.
+function cicloEvolucao(estado, t, concursos) {
+  const vivos = estado.especialistas.filter(e => e.familia === "evolucao");
+  const r = evoluir({ X: estado.banco.X, conjuntos: estado.banco.conjuntos, t, elite: vivos.map(v => v.genoma) });
+  const nulo = estado.especialistas.find(e => e.nulo);
+  const promovidos = [];
+  for (const p of r.promovidos) {
+    const desc = descreverGenoma(p.g);
+    if (vivos.some(v => v.nome === desc)) continue;
+    // Entra em "período de prova": 1% do peso total, e perda inicial igual à do nulo.
+    const max = Math.max(...estado.especialistas.map(e => e.logw));
+    estado.especialistas.push({ familia: "evolucao", nome: desc, genoma: p.g, esp: p.esp, logw: max + Math.log(0.01), perda: nulo.perda, perdaTotal: 0, criadoEm: t });
+    promovidos.push({ nome: desc, treino: p.treino, validacao: p.validacao });
+  }
+  // Limite de evoluídos vivos: saem os que estão em quarentena e, se sobrar
+  // gente demais, os de pior desempenho recente.
+  let evoluidos = estado.especialistas.filter(e => e.familia === "evolucao");
+  const removidos = [];
+  const tirar = e => { estado.especialistas = estado.especialistas.filter(x => x !== e); removidos.push(e.nome); };
+  evoluidos.filter(e => emQuarentena(estado, e)).forEach(tirar);
+  evoluidos = estado.especialistas.filter(e => e.familia === "evolucao").sort((a, b) => a.perda - b.perda);
+  evoluidos.slice(MAX_EVOLUIDOS).forEach(tirar);
+  estado.evolucoes.push({
+    concurso: concursos ? concursos[t] : t + 1, avaliados: r.avaliados,
+    melhor: { nome: descreverGenoma(r.melhor.g), treino: r.melhor.treino, validacao: r.melhor.validacao },
+    promovidos, removidos, rejeitados: r.rejeitados.map(x => ({ nome: descreverGenoma(x.g), treino: x.treino, validacao: x.validacao })),
+    vivos: estado.especialistas.filter(e => e.familia === "evolucao").length,
+  });
+}
+
+function jogosBaseline(X, t) {
+  const r = rng(t + 1), freq = new Array(26), rec = new Array(26), mk = new Array(26);
+  for (let n = 1; n <= 25; n++) { const o = (t * 26 + n) * K; freq[n] = X[o + IDX.zTudo]; rec[n] = X[o + IDX.z200]; mk[n] = X[o + IDX.markov1]; }
+  return { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15), frequencia: top15(freq), bayes: top15(rec), markov: top15(mk) };
+}
+
+// Replay completo. Versão por etapas: `passo()` processa um concurso; a
+// versão síncrona roda tudo, a assíncrona cede a interface a cada bloco.
+function iniciarReplay(sorteios, opcoes) {
+  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, banco = null, janelaRedundancia = 800 } = opcoes;
+  const ctx = { sorteios };
+  const bancoUsado = banco || construirBanco(sorteios);
+  const estado = criarEstado(familiasAtivas, ctx, bancoUsado);
+  const res = {
+    acertos: [], acertosBaseline: Object.fromEntries(Object.keys(BASELINES).map(b => [b, []])), registros: [], pontos: [], desvioFamilia: {},
+    perdaMistura: 0, perdaNula: 0, n: 0, penultimaPrevisao: null, estado,
+  };
+  const T = sorteios.length;
+  const passo = t => {
+    const preds = previsoesIndividuais(estado, t);
+    if (t >= aquecimento) {
+      const prev = combinar(estado, preds);
+      const s = bancoUsado.conjuntos[t];
+      const a = prev.jogo.filter(x => s.has(x)).length;
+      res.acertos.push(a);
+      res.perdaMistura += perdaLog(prev.probs, s);
+      res.perdaNula += perdaLog(new Array(26).fill(0.6), s);
+      res.n++;
+      if (guardarRegistros) res.registros.push({ concurso: concursos ? concursos[t] : t + 1, probs: prev.probs, sorteio: sorteios[t], jogo: prev.jogo, acertos: a });
+      if (baselines) { const jb = jogosBaseline(bancoUsado.X, t); for (const b of Object.keys(BASELINES)) res.acertosBaseline[b].push(jb[b].filter(x => s.has(x)).length); }
+      if (guardarRegistros && t >= T - janelaRedundancia) {
+        estado.especialistas.forEach((e, i) => {
+          if (e.nulo || e.familia === "evolucao") return;
+          const arr = (res.desvioFamilia[e.familia] ||= []);
+          for (let k = 1; k <= 25; k++) arr.push(preds[i][k] - 0.6);
+        });
+      }
+      if (t === T - 1) res.penultimaPrevisao = prev;
+      if (t % 20 === 0) res.pontos.push({ rotulo: concursos ? concursos[t] : t + 1, valor: prev.confianca, familias: prev.familias });
+    }
+    aprender(estado, t, preds);
+    if (estado.evolui && t + 1 >= INICIO_EVOLUCAO && (t + 1 - INICIO_EVOLUCAO) % PASSO_EVOLUCAO === 0) cicloEvolucao(estado, t + 1, concursos);
+  };
+  const fim = () => { res.ganho = res.n ? (res.perdaNula - res.perdaMistura) / res.n : 0; return res; };
+  return { passo, fim, T };
+}
+
+export function simular(sorteios, opcoes = {}) {
+  const r = iniciarReplay(sorteios, opcoes);
+  for (let t = 0; t < r.T; t++) r.passo(t);
+  return r.fim();
+}
+
+export async function simularAsync(sorteios, opcoes = {}) {
+  const { onProgresso } = opcoes;
+  const r = iniciarReplay(sorteios, opcoes);
+  for (let t = 0; t < r.T; t++) {
+    r.passo(t);
+    if (t % 150 === 149) { onProgresso?.(t + 1, r.T); await new Promise(res => setTimeout(res, 0)); }
+  }
+  onProgresso?.(r.T, r.T);
+  return r.fim();
+}
+
+// ── Análises sobre o estado treinado ───────────────────────────────────────
+
+export function governanca(estado) {
+  const nulo = estado.especialistas.find(e => e.nulo);
+  const linhas = FAMILIAS_SINAL.map(f => {
+    const es = estado.especialistas.filter(e => e.familia === f);
+    if (!es.length) return { familia: f, status: f === "evolucao" && estado.evolui ? "Aguardando" : "Desativada" };
+    const melhor = es.reduce((a, b) => (b.perda < a.perda ? b : a));
+    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...es.map(e => e.perdaTotal)), emSombra: es.every(e => emQuarentena(estado, e)), n: es.length };
+  });
+  const ativas = linhas.filter(l => l.vantagemRecente != null);
+  const campea = ativas.reduce((a, b) => (b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a), null);
+  for (const l of ativas) l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.emSombra ? "Quarantine" : "Watch";
+  return linhas;
+}
+
+export function especialistasDetalhe(estado) {
+  const w = pesosMistura(estado), nulo = estado.especialistas.find(e => e.nulo);
+  return estado.especialistas.map((e, i) => ({ familia: e.familia, nome: e.nome, peso: w[i], vantagemRecente: nulo.perda - e.perda, quarentena: emQuarentena(estado, e), criadoEm: e.criadoEm }));
+}
+
 export function explicarDezena(previsao, n) {
   return Object.entries(previsao.porFamilia)
     .map(([familia, f]) => ({ familia, peso: f.peso, contribuicao: f.p[n] - f.peso * 0.6 }))
     .sort((a, b) => Math.abs(b.contribuicao) - Math.abs(a.contribuicao));
 }
 
-// Contrafactual leave-one-family-out: probabilidade de cada dezena se a
-// família fosse ignorada hoje.
-export function contrafactual(estado, X = caracteristicas(estado)) {
-  const base = prever(estado, X);
-  return FAMILIAS_SINAL.filter(f => estado.modelos.some(m => m.familia === f)).map(f => {
-    const sem = prever(estado, X, { excluir: f });
+export function contrafactual(estado) {
+  const preds = previsoesIndividuais(estado, estado.t);
+  const base = combinar(estado, preds);
+  return FAMILIAS_SINAL.filter(f => estado.especialistas.some(e => e.familia === f)).map(f => {
+    const sem = combinar(estado, preds, f);
     const deltas = Array.from({ length: 26 }, (_, n) => (n ? base.probs[n] - sem.probs[n] : 0));
-    const trocas = base.jogo.filter(n => !sem.jogo.includes(n)).length;
-    return { familia: f, deltas, trocasNoJogo: trocas, maiorDelta: Math.max(...deltas.map(Math.abs)) };
+    return { familia: f, deltas, trocasNoJogo: base.jogo.filter(n => !sem.jogo.includes(n)).length, maiorDelta: Math.max(...deltas.map(Math.abs)) };
   });
 }
 
-// Governança: status de cada família pela vantagem sobre o nulo (em nats de
-// perda logarítmica) — recente (com esquecimento) e acumulada.
-export function governanca(estado) {
-  const nulo = estado.modelos.find(m => m.nulo);
-  const linhas = FAMILIAS_SINAL.map(f => {
-    const ms = estado.modelos.filter(m => m.familia === f);
-    if (!ms.length) return { familia: f, status: "Desativada" };
-    const melhor = ms.reduce((a, b) => (b.perda < a.perda ? b : a));
-    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map(m => m.perdaTotal)), emSombra: ms.every(m => emQuarentena(estado, m)) };
-  });
-  const ativas = linhas.filter(l => l.status !== "Desativada");
-  const campea = ativas.reduce((a, b) => (b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a), null);
-  for (const l of ativas) {
-    l.status = l === campea && l.vantagemRecente > 2 ? "Champion"
-      : l.vantagemRecente > 0 ? "Challenger"
-      : l.emSombra ? "Quarantine" : "Watch";
-  }
-  return linhas;
+export function explicarEscolha(previsao, n) {
+  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
+  const posicao = ordem.indexOf(n) + 1;
+  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
+  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter(f => f.familia !== "nulo").slice(0, 3) };
 }
 
-// Aprende com um sorteio (depois de ele ter sido previsto).
-export function registrar(estado, dezenas, X = caracteristicas(estado)) {
-  const sorteado = new Set(dezenas);
-  for (const m of estado.modelos) {
-    const p = probsModelo(m, X);
-    const l = perdaLog(p, sorteado);
-    m.perda = ESQUECIMENTO * m.perda + l;
-    m.perdaTotal += l;
-    if (m.nulo) continue;
-    const g = new Float64Array(K + 1);
-    for (let n = 1; n <= 25; n++) {
-      const erro = p[n] - (sorteado.has(n) ? 1 : 0);
-      for (const k of m.usa) g[k] += erro * X[n][k];
-    }
-    for (const k of m.usa) {
-      m.g2[k] += g[k] * g[k];
-      m.w[k] -= (m.lr / Math.sqrt(m.g2[k])) * g[k] * Math.sqrt(estado.t + 1) * 0.05;
-    }
-  }
-  // Estatísticas de transição (antes de atualizar ultimoVisto).
-  const t = estado.t, ultimo = estado.historico[t - 1], penultimo = estado.historico[t - 2];
-  for (let n = 1; n <= 25; n++) {
-    const y = sorteado.has(n) ? 1 : 0;
-    if (ultimo) { const tr = estado.trans1[n][ultimo.has(n) ? 1 : 0]; tr[0]++; tr[1] += y; }
-    if (penultimo) { const tr = estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)]; tr[0]++; tr[1] += y; }
-    if (t > 0) { const hz = estado.hazard[gapDe(estado, n)]; hz[0]++; hz[1] += y; }
-    estado.emaLenta[n] += 0.05 * (y - estado.emaLenta[n]);
-    estado.emaMedia[n] += 0.1 * (y - estado.emaMedia[n]);
-    estado.emaRapida[n] += 0.2 * (y - estado.emaRapida[n]);
-  }
-  for (const n of dezenas) {
-    estado.cont[n]++;
-    estado.seq[n] = estado.ultimoVisto[n] === t - 1 ? estado.seq[n] + 1 : 1;
-    estado.ultimoVisto[n] = t;
-    for (const j of dezenas) if (j !== n) estado.cooc[n][j]++;
-  }
-  for (let n = 1; n <= 25; n++) if (!sorteado.has(n)) estado.seq[n] = 0;
-  estado.historico.push(sorteado);
-  estado.mascaras.push(dezenas.reduce((m, n) => m | (1 << (n - 1)), 0));
-  estado.t++;
-}
-
-// Baselines permanentes, calculados no mesmo replay e com o mesmo passado.
-export const BASELINES = {
-  aleatorio: "Aleatório",
-  frequencia: "Frequência simples (histórico todo)",
-  bayes: "Bayes simples (Beta, últimos 200)",
-  markov: "Markov simples (ordem 1)",
-};
-function jogosBaseline(estado, i) {
-  const r = rng(i + 1);
-  const out = { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15) };
-  const freq = new Array(26).fill(0), bayes = new Array(26).fill(0), markov = new Array(26).fill(0);
-  const h = estado.historico, ini = Math.max(0, h.length - 200), ult = h[h.length - 1];
-  for (let n = 1; n <= 25; n++) {
-    freq[n] = estado.t ? estado.cont[n] / estado.t : 0.6;
-    let c = 0;
-    for (let k = ini; k < h.length; k++) if (h[k].has(n)) c++;
-    bayes[n] = (c + 30 * 0.6) / (h.length - ini + 30);
-    const tr = ult ? estado.trans1[n][ult.has(n) ? 1 : 0] : [0, 0];
-    markov[n] = (tr[1] + 20 * 0.6) / (tr[0] + 20);
-  }
-  out.frequencia = top15(freq); out.bayes = top15(bayes); out.markov = top15(markov);
-  return out;
-}
-
-// Replay cronológico test-then-learn: prevê cada concurso só com o passado,
-// guarda a previsão e depois aprende com o resultado.
-export function simular(sorteios, opcoes = {}) {
-  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, janelaRedundancia = 800 } = opcoes;
-  const estado = criarEstado(familiasAtivas);
-  const acertos = [], pontos = [], registros = [];
-  const acertosBaseline = Object.fromEntries(Object.keys(BASELINES).map(b => [b, []]));
-  const desvioFamilia = {}; // família → desvios (p − 60%) por dezena nos últimos concursos, para redundância
-  let perdaMistura = 0, perdaNula = 0, n = 0, penultimaPrevisao = null;
-  sorteios.forEach((dezenas, i) => {
-    const X = caracteristicas(estado);
-    if (i >= aquecimento) {
-      const prev = prever(estado, X);
-      const s = new Set(dezenas);
-      const a = prev.jogo.filter(x => s.has(x)).length;
-      acertos.push(a);
-      perdaMistura += perdaLog(prev.probs, s);
-      perdaNula += perdaLog(new Array(26).fill(0.6), s);
-      n++;
-      if (guardarRegistros) registros.push({ concurso: concursos ? concursos[i] : i + 1, probs: prev.probs, sorteio: dezenas, jogo: prev.jogo, acertos: a });
-      if (baselines) {
-        const jb = jogosBaseline(estado, i);
-        for (const b of Object.keys(BASELINES)) acertosBaseline[b].push(jb[b].filter(x => s.has(x)).length);
-      }
-      if (guardarRegistros && i >= sorteios.length - janelaRedundancia) {
-        for (const m of estado.modelos) {
-          if (m.nulo) continue;
-          const pm = probsModelo(m, X);
-          const arr = (desvioFamilia[`${m.familia}|${m.lr}`] ||= []);
-          for (let k = 1; k <= 25; k++) arr.push(pm[k] - 0.6);
-        }
-      }
-      if (i === sorteios.length - 1) penultimaPrevisao = prev;
-      if (i % 20 === 0) pontos.push({ rotulo: concursos ? concursos[i] : i + 1, valor: prev.confianca, familias: prev.familias });
-    }
-    registrar(estado, dezenas, X);
-  });
-  return { acertos, acertosBaseline, desvioFamilia, penultimaPrevisao, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
-}
-
-// Redundância: correlação entre as previsões (desvio de 60%) das famílias.
-// Famílias muito correlacionadas dizem a mesma coisa.
 export function redundanciaFamilias(res) {
-  const porFamilia = {};
-  for (const [k, v] of Object.entries(res.desvioFamilia)) {
-    const f = k.split("|")[0];
-    if (!porFamilia[f] || k.endsWith("|0.02")) porFamilia[f] = v; // usa o aprendiz mais rápido
-  }
-  const fams = Object.keys(porFamilia);
+  const fams = Object.keys(res.desvioFamilia);
   const corr = (a, b) => {
     const n = Math.min(a.length, b.length);
     let ma = 0, mb = 0;
@@ -346,59 +282,62 @@ export function redundanciaFamilias(res) {
     for (let i = 0; i < n; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
     return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0;
   };
-  return { familias: fams, matriz: fams.map(a => fams.map(b => corr(porFamilia[a], porFamilia[b]))) };
+  return { familias: fams, matriz: fams.map(a => fams.map(b => corr(res.desvioFamilia[a], res.desvioFamilia[b]))) };
 }
 
-// O que mudou entre a previsão do último concurso e a do próximo.
 export function resumoMudancas(res) {
   const antes = res.penultimaPrevisao, depois = prever(res.estado);
   if (!antes) return null;
   const familias = FAMILIAS.map(f => ({ familia: f.id, antes: antes.familias[f.id] || 0, depois: depois.familias[f.id] || 0 }))
     .map(f => ({ ...f, delta: f.depois - f.antes })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
   return {
-    entraram: depois.jogo.filter(n => !antes.jogo.includes(n)),
-    sairam: antes.jogo.filter(n => !depois.jogo.includes(n)),
-    confiancaAntes: antes.confianca, confiancaDepois: depois.confianca,
-    familias,
+    entraram: depois.jogo.filter(n => !antes.jogo.includes(n)), sairam: antes.jogo.filter(n => !depois.jogo.includes(n)),
+    confiancaAntes: antes.confianca, confiancaDepois: depois.confianca, familias,
     maioresMudancas: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, delta: depois.probs[i + 1] - antes.probs[i + 1] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5),
   };
 }
 
-// Por que uma dezena entrou (ou ficou fora) do jogo: distância até o corte
-// entre a 15ª e a 16ª posição e as famílias que mais pesaram.
-export function explicarEscolha(previsao, n) {
-  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
-  const posicao = ordem.indexOf(n) + 1;
-  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
-  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter(f => f.familia !== "nulo").slice(0, 3) };
+// Estado interno para a interface: Boltzmann, regimes e evolução.
+export function inspecionar(res) {
+  const bz = res.estado.especialistas.find(e => e.familia === "boltzmann");
+  const banco = res.estado.banco;
+  const T = banco.T;
+  const recentes = Array.from({ length: 26 }, () => 0);
+  for (let t = Math.max(0, T - 200); t < T; t++) for (let n = 1; n <= 25; n++) recentes[n] = Math.max(recentes[n], banco.mudanca[t * 26 + n]);
+  return {
+    boltzmann: bz ? acoplamentosFortes(bz.esp.maquina) : null,
+    regimes: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, idade: banco.idadeRegime[i + 1], picoMudanca200: recentes[i + 1] })),
+    evolucoes: res.estado.evolucoes,
+    especialistas: especialistasDetalhe(res.estado),
+  };
 }
 
-// Teste de padrão temporal: embaralha a ORDEM dos sorteios (destrói memória,
-// quentes/frios, pares com o último, Markov, KNN) mas mantém a frequência global.
+// Teste de padrão temporal: embaralha a ordem dos concursos e refaz tudo.
 export async function testeTemporal(sorteios, opcoes = {}) {
-  const { n = 30, semente = 7, onProgresso, aquecimento } = opcoes;
+  const { n = 10, semente = 7, onProgresso, aquecimento } = opcoes;
   const real = simular(sorteios, { aquecimento, guardarRegistros: false });
   const r = rng(semente), nulos = [];
   for (let i = 0; i < n; i++) {
     nulos.push(simular(embaralhar(sorteios, r), { aquecimento, guardarRegistros: false }).ganho);
-    if (onProgresso) { onProgresso(i + 1, n); await new Promise(res => setTimeout(res, 0)); }
+    onProgresso?.(i + 1, n);
+    await new Promise(res => setTimeout(res, 0));
   }
   return { ganhoReal: real.ganho, nulos, p: (nulos.filter(g => g >= real.ganho).length + 1) / (n + 1) };
 }
 
-// Scanner de ablação: roda o replay inteiro sem cada família e compara com o
-// motor completo. Família que ao sair MELHORA o resultado está atrapalhando.
+// Scanner de ablação: replay sem cada família (reaproveita o banco).
 export async function scannerAblacao(sorteios, opcoes = {}) {
   const { onProgresso, aquecimento = 200 } = opcoes;
+  const banco = construirBanco(sorteios);
   const resumo = r => ({ ganho: r.ganho, acertos: r.acertos.reduce((a, b) => a + b, 0) / r.n, recentes: r.acertos.slice(-500).reduce((a, b) => a + b, 0) / Math.min(500, r.n) });
-  const base = resumo(simular(sorteios, { aquecimento, guardarRegistros: false }));
+  const base = resumo(simular(sorteios, { aquecimento, guardarRegistros: false, banco }));
   const linhas = [];
   for (let i = 0; i < FAMILIAS_SINAL.length; i++) {
     const f = FAMILIAS_SINAL[i];
-    const sem = resumo(simular(sorteios, { aquecimento, guardarRegistros: false, familiasAtivas: new Set(FAMILIAS_SINAL.filter(x => x !== f)) }));
+    const sem = resumo(simular(sorteios, { aquecimento, guardarRegistros: false, banco, familiasAtivas: new Set(FAMILIAS_SINAL.filter(x => x !== f)) }));
     linhas.push({ familia: f, ...sem, deltaGanho: base.ganho - sem.ganho, deltaAcertos: base.acertos - sem.acertos, deltaRecentes: base.recentes - sem.recentes });
-    if (onProgresso) { onProgresso(i + 1, FAMILIAS_SINAL.length); await new Promise(res => setTimeout(res, 0)); }
+    onProgresso?.(i + 1, FAMILIAS_SINAL.length);
+    await new Promise(res => setTimeout(res, 0));
   }
-  // deltaGanho > 0: a família ajuda (tirá-la piora); < 0: atrapalha.
   return { base, linhas: linhas.sort((a, b) => b.deltaGanho - a.deltaGanho) };
 }

@@ -3966,35 +3966,35 @@ function parseMapa(textoBruto) {
   const cuspides = new Array(13).fill(null);
   const aspectos = [];
   const avisos = [];
-  const aviso = (nivel, msg, linha = null) => avisos.push({ nivel, msg, linha });
+  const aviso = (nivel, msg, linha2 = null) => avisos.push({ nivel, msg, linha: linha2 });
   const linhas = texto.split("\n").flatMap((l) => l.split(/;\s*(?=[A-Z])/)).map((l) => l.trim()).filter(Boolean);
-  for (const linha of linhas) {
+  for (const linha2 of linhas) {
     let m;
-    if (m = linha.match(RX_ASPECTO)) {
+    if (m = linha2.match(RX_ASPECTO)) {
       const a = idDoNome(m[1]), b = idDoNome(m[3]), tipo = TIPO_PARA_ID.get(m[2].toLowerCase());
       const status = m[7] ? { applying: "aplicando", separating: "separando", exact: "exato" }[m[7].toLowerCase()] : null;
       if (a === b) {
-        aviso("aviso", "Aspecto de um ponto com ele mesmo", linha);
+        aviso("aviso", "Aspecto de um ponto com ele mesmo", linha2);
         continue;
       }
       aspectos.push({ a, b, tipo, orbe: graus(m[4], m[5], m[6]), status, statusTexto: !!status });
-    } else if (m = linha.match(RX_CUSPIDE)) {
+    } else if (m = linha2.match(RX_CUSPIDE)) {
       const casa = Number(m[1]);
       if (casa < 1 || casa > 12) {
-        aviso("erro", `Casa ${casa} inválida`, linha);
+        aviso("erro", `Casa ${casa} inválida`, linha2);
         continue;
       }
       const g = graus(m[3], m[4], m[5]);
       if (g >= 30) {
-        aviso("erro", "Grau da cúspide ≥ 30°", linha);
+        aviso("erro", "Grau da cúspide ≥ 30°", linha2);
         continue;
       }
       cuspides[casa] = SIGNOS.findIndex((s) => s.id === SIGNO_PARA_ID.get(m[2].toLowerCase())) * 30 + g;
-    } else if (m = linha.match(RX_PONTO)) {
+    } else if (m = linha2.match(RX_PONTO)) {
       const id = idDoNome(m[1]);
       const g = graus(m[3], m[4], m[5]);
       if (g >= 30) {
-        aviso("erro", "Grau ≥ 30°", linha);
+        aviso("erro", "Grau ≥ 30°", linha2);
         continue;
       }
       const indice = SIGNOS.findIndex((s) => s.id === SIGNO_PARA_ID.get(m[2].toLowerCase()));
@@ -4006,7 +4006,7 @@ function parseMapa(textoBruto) {
         estacionarioTexto: estado.startsWith("stationary"),
         casaDeclarada: m[7] ? Number(m[7]) : null
       };
-    } else if (m = linha.match(RX_VELOCIDADE)) {
+    } else if (m = linha2.match(RX_VELOCIDADE)) {
       const id = idDoNome(m[1]);
       const sinal = m[2] ? -1 : 1;
       pontos[id] = {
@@ -4018,7 +4018,7 @@ function parseMapa(textoBruto) {
         }
       };
     } else {
-      aviso("aviso", "Linha não reconhecida (ignorada)", linha);
+      aviso("aviso", "Linha não reconhecida (ignorada)", linha2);
     }
   }
   if (Number.isFinite(pontos.asc?.lon)) pontos.dsc = { lon: norm360(pontos.asc.lon + 180) };
@@ -4046,9 +4046,9 @@ function parseMapa(textoBruto) {
   const vistos = /* @__PURE__ */ new Set();
   const aspectosOk = [];
   for (const asp of aspectos) {
-    const chave = [asp.a, asp.b].sort().join("+") + ":" + asp.tipo;
-    if (vistos.has(chave)) continue;
-    vistos.add(chave);
+    const chave2 = [asp.a, asp.b].sort().join("+") + ":" + asp.tipo;
+    if (vistos.has(chave2)) continue;
+    vistos.add(chave2);
     const pa = pontos[asp.a], pb = pontos[asp.b];
     if (!Number.isFinite(pa?.lon) || !Number.isFinite(pb?.lon)) {
       aviso("aviso", `Aspecto ${asp.a}–${asp.b}: ponto sem posição`);
@@ -4075,14 +4075,14 @@ function parseMapa(textoBruto) {
 function dividirMapasEmLote(texto) {
   const blocos = [];
   let atual = null;
-  for (const linha of String(texto || "").replace(/\r/g, "").split("\n")) {
-    const m = linha.trim().match(/^(?:=+\s*)?(?:#|concurso\s*:?\s*|contest\s*:?\s*)?(\d{3,5})\s*(?::|=+)?\s*$/i);
+  for (const linha2 of String(texto || "").replace(/\r/g, "").split("\n")) {
+    const m = linha2.trim().match(/^(?:=+\s*)?(?:#|concurso\s*:?\s*|contest\s*:?\s*)?(\d{3,5})\s*(?::|=+)?\s*$/i);
     if (m) {
       atual = { concurso: Number(m[1]), linhas: [] };
       blocos.push(atual);
       continue;
     }
-    if (atual) atual.linhas.push(linha);
+    if (atual) atual.linhas.push(linha2);
   }
   return blocos.map((b) => ({ concurso: b.concurso, texto: b.linhas.join("\n").trim() })).filter((b) => b.texto);
 }
@@ -4185,8 +4185,8 @@ var natureza = (id) => BENEFICOS.has(id) ? "benefico" : MALEFICOS.has(id) ? "mal
 function extrairSinais(mapa) {
   const { pontos, cuspides, aspectos } = mapa;
   const sinais = /* @__PURE__ */ new Map();
-  const add = (chave, grupo, rotulo, lento = false) => {
-    if (!sinais.has(chave)) sinais.set(chave, { chave, grupo, rotulo, lento });
+  const add = (chave2, grupo, rotulo, lento = false) => {
+    if (!sinais.has(chave2)) sinais.set(chave2, { chave: chave2, grupo, rotulo, lento });
   };
   const ok = (id) => Number.isFinite(pontos[id]?.lon);
   const sol = pontos.sol;
@@ -4528,14 +4528,18 @@ function qValoresBH(pValores) {
   return q;
 }
 function calibrarSoma15(logits) {
-  let lo = -20, hi = 20;
-  for (let it = 0; it < 60; it++) {
-    const c2 = (lo + hi) / 2;
-    const s = logits.reduce((acc, x) => acc + sigmoid(x + c2), 0);
-    if (s > 15) hi = c2;
-    else lo = c2;
+  let c = 0;
+  for (let it = 0; it < 30; it++) {
+    let s = 0, d = 0;
+    for (const x of logits) {
+      const q = sigmoid(x + c);
+      s += q;
+      d += q * (1 - q);
+    }
+    const passo = (s - 15) / Math.max(d, 1e-9);
+    c -= Math.max(-5, Math.min(5, passo));
+    if (Math.abs(passo) < 1e-10) break;
   }
-  const c = (lo + hi) / 2;
   return logits.map((x) => sigmoid(x + c));
 }
 var acertos = (jogo, resultado) => {
@@ -4827,8 +4831,8 @@ function somaContraste(estado, chaves, pi1, kappa) {
     cache.porConfig = /* @__PURE__ */ new Map();
   }
   const S = new Array(26).fill(0);
-  for (const chave of chaves) {
-    const c = estado.sinais.get(chave);
+  for (const chave2 of chaves) {
+    const c = estado.sinais.get(chave2);
     if (!c) continue;
     for (let n = 1; n <= 25; n++) S[n] += pesoContraste(c.hits[n], c.dias, estado.hitsMapas[n], estado.nMapas, pi1, kappa).peso;
   }
@@ -4847,10 +4851,10 @@ function logitsAprendiz(a, chaves, estado) {
     return s;
   }
   const lista = a.semSinais ? [BIAS] : [BIAS, ...chaves];
-  for (const chave of lista) {
-    const t = a.tab.get(chave);
+  for (const chave2 of lista) {
+    const t = a.tab.get(chave2);
     if (!t) continue;
-    const l1 = chave === BIAS ? 0 : a.l1;
+    const l1 = chave2 === BIAS ? 0 : a.l1;
     for (let n = 1; n <= 25; n++) s[n] += pesoFTRL(a, t[n], t[26 + n], l1);
   }
   return s;
@@ -4860,18 +4864,18 @@ function atualizarAprendiz(a, chaves, resultado, estado) {
   const r = new Set(resultado);
   const s = logitsAprendiz(a, chaves, estado);
   const lista = a.semSinais ? [BIAS] : [BIAS, ...chaves];
-  for (const chave of lista) {
-    let t = a.tab.get(chave);
+  for (const chave2 of lista) {
+    let t = a.tab.get(chave2);
     if (!t) {
       t = new Float64Array(52);
-      a.tab.set(chave, t);
+      a.tab.set(chave2, t);
     }
-    const l1 = chave === BIAS ? 0 : a.l1;
+    const l1 = chave2 === BIAS ? 0 : a.l1;
     for (let n = 1; n <= 25; n++) {
       const g = sigmoid(s[n]) - (r.has(n) ? 1 : 0);
       const w = pesoFTRL(a, t[n], t[26 + n], l1);
-      const sig = (Math.sqrt(t[26 + n] + g * g) - Math.sqrt(t[26 + n])) / a.alpha;
-      t[n] += g - sig * w;
+      const sig2 = (Math.sqrt(t[26 + n] + g * g) - Math.sqrt(t[26 + n])) / a.alpha;
+      t[n] += g - sig2 * w;
       t[26 + n] += g * g;
     }
   }
@@ -4927,11 +4931,11 @@ function registrar(estado, concurso) {
     for (const a of estado.aprendizes) a.perda += perdaLog(probsAprendiz(a, chaves, estado), resultado);
     estado.nMapas++;
     for (const n of resultado) estado.hitsMapas[n]++;
-    for (const chave of chaves) {
-      let c = estado.sinais.get(chave);
+    for (const chave2 of chaves) {
+      let c = estado.sinais.get(chave2);
       if (!c) {
         c = { dias: 0, hits: new Int32Array(26) };
-        estado.sinais.set(chave, c);
+        estado.sinais.set(chave2, c);
       }
       c.dias++;
       for (const n of resultado) c.hits[n]++;
@@ -4966,17 +4970,17 @@ function explicarNumero(estado, chaves, numero) {
     if (a2.astral && (melhor < 0 || pesos[i] > pesos[melhor])) melhor = i;
   });
   const a = estado.aprendizes[melhor];
-  return chaves.map((chave) => {
-    const c = estado.sinais.get(chave);
+  return chaves.map((chave2) => {
+    const c = estado.sinais.get(chave2);
     let peso = 0, prob = null;
     if (a.contraste) {
       if (c) ({ peso, prob } = pesoContraste(c.hits[numero], c.dias, estado.hitsMapas[numero], estado.nMapas, a.pi1, a.kappa));
       peso *= a.lambda;
     } else {
-      const t = a.tab.get(chave);
+      const t = a.tab.get(chave2);
       peso = t ? pesoFTRL(a, t[numero], t[26 + numero], a.l1) : 0;
     }
-    return { chave, peso, prob, dias: c?.dias || 0, hits: c?.hits[numero] || 0 };
+    return { chave: chave2, peso, prob, dias: c?.dias || 0, hits: c?.hits[numero] || 0 };
   }).filter((x) => Math.abs(x.peso) > 1e-4).sort((x, y) => Math.abs(y.peso) - Math.abs(x.peso));
 }
 function simular(concursos, opcoes = {}) {
@@ -5256,7 +5260,7 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
     setMsg("Mapa salvo.");
     setTimeout(() => setMsg(null), 2500);
   };
-  const registrar3 = async () => {
+  const registrar2 = async () => {
     await acoes.registrarDiario(nConc, previsao.porMotor);
     setMsg("Jogos registrados no diário (com data, hora e hash).");
     setTimeout(() => setMsg(null), 3500);
@@ -5320,7 +5324,7 @@ function AbaConcurso({ app, concursos, meta, acoes, simulacao, inicial }) {
               </div>)}
           </div>
           <div style={{ marginTop: 12 }}>
-            {resultado ? <Aviso tom="info">Este concurso já tem resultado: os acertos acima são retroativos e não contam no placar prospectivo.</Aviso> : <Botao onClick={registrar3} disabled={jaRegistrado}>{jaRegistrado ? "Já registrado no diário" : "Registrar jogos no diário (antes do sorteio)"}</Botao>}
+            {resultado ? <Aviso tom="info">Este concurso já tem resultado: os acertos acima são retroativos e não contam no placar prospectivo.</Aviso> : <Botao onClick={registrar2} disabled={jaRegistrado}>{jaRegistrado ? "Já registrado no diário" : "Registrar jogos no diário (antes do sorteio)"}</Botao>}
           </div>
           <details style={{ marginTop: 14 }}>
             <summary style={{ cursor: "pointer", color: T.textSoft, fontSize: 13 }}>Peso de cada modelo na mistura</summary>
@@ -5524,11 +5528,11 @@ function contarSinais(concursos) {
   const meio = Math.floor(comMapa.length / 2);
   const cont = /* @__PURE__ */ new Map();
   comMapa.forEach((c, i) => {
-    for (const chave of c.chaves) {
-      let x = cont.get(chave);
+    for (const chave2 of c.chaves) {
+      let x = cont.get(chave2);
       if (!x) {
         x = { dias: 0, hits: new Int32Array(26), dias1: 0, hits1: new Int32Array(26), ultimo: null };
-        cont.set(chave, x);
+        cont.set(chave2, x);
       }
       x.dias++;
       if (i < meio) x.dias1++;
@@ -5547,14 +5551,14 @@ function descobrirSinais(concursos, opcoes = {}) {
   for (const x of cont.values()) if (x.dias >= minDias) for (let n = 1; n <= 25; n++) celulas.push([x.hits[n], x.dias]);
   const hiper = ajustarHiper(celulas);
   const linhas = [];
-  for (const [chave, x] of cont) {
+  for (const [chave2, x] of cont) {
     if (x.dias < minDias) continue;
     for (let n = 1; n <= 25; n++) {
       const hits = x.hits[n];
       const d2 = x.dias - x.dias1, h2 = hits - x.hits1[n];
       const t1 = x.dias1 ? x.hits1[n] / x.dias1 : null, t2 = d2 ? h2 / d2 : null;
       linhas.push({
-        chave,
+        chave: chave2,
         numero: n,
         dias: x.dias,
         hits,
@@ -6456,331 +6460,747 @@ function gerarLaudo(historico, opcoes = {}) {
   return { testes, nConcursos: N, desvios: testes.filter((t) => t.desvio).length, blocos };
 }
 
-// src/quantico/motor.js
+// src/quantico/banco.js
 var CARACTERISTICAS = [
-  { id: "f10", nome: "Frequência nos últimos 10" },
-  { id: "f30", nome: "Frequência nos últimos 30" },
-  { id: "f100", nome: "Frequência nos últimos 100" },
-  { id: "f500", nome: "Frequência nos últimos 500" },
-  { id: "fTudo", nome: "Frequência no histórico todo" },
-  { id: "ema", nome: "Média móvel exponencial" },
-  { id: "momentum", nome: "Momentum (EMA curta − EMA longa)" },
+  { id: "z5", nome: "Frequência últimos 5 (z)" },
+  { id: "z10", nome: "Frequência últimos 10 (z)" },
+  { id: "z20", nome: "Frequência últimos 20 (z)" },
+  { id: "z50", nome: "Frequência últimos 50 (z)" },
+  { id: "z100", nome: "Frequência últimos 100 (z)" },
+  { id: "z200", nome: "Frequência últimos 200 (z)" },
+  { id: "z500", nome: "Frequência últimos 500 (z)" },
+  { id: "zTudo", nome: "Frequência no histórico todo (z)" },
+  { id: "ema05", nome: "Média exponencial lenta (z)" },
+  { id: "ema10", nome: "Média exponencial média (z)" },
+  { id: "ema20", nome: "Média exponencial rápida (z)" },
+  { id: "momentum", nome: "Momentum (rápida − lenta)" },
   { id: "ultimo", nome: "Saiu no último concurso" },
-  { id: "atraso", nome: "Atraso (concursos sem sair)" },
-  { id: "sequencia", nome: "Sequência de presenças seguidas" },
-  { id: "markov1", nome: "Markov ordem 1 (transição da própria dezena)" },
-  { id: "markov2", nome: "Markov ordem 2 (últimos 2 estados)" },
-  { id: "hazard", nome: "Pressão do atraso (hazard empírico)" },
-  { id: "pares", nome: "Afinidade de pares com o último sorteio" },
-  { id: "knn", nome: "Similaridade histórica (KNN)" },
-  { id: "linha", nome: "Nível da linha do volante (últimos 20)" },
-  { id: "coluna", nome: "Nível da coluna do volante (últimos 20)" }
+  { id: "penultimo", nome: "Saiu no penúltimo" },
+  { id: "atraso", nome: "Atraso (log)" },
+  { id: "atrasoRaro", nome: "Raridade do atraso (surpresa)" },
+  { id: "sequencia", nome: "Sequência de presenças" },
+  { id: "markov1", nome: "Markov ordem 1" },
+  { id: "markov2", nome: "Markov ordem 2" },
+  { id: "hazard", nome: "Hazard empírico do atraso" },
+  { id: "pares", nome: "Afinidade de pares com o último" },
+  { id: "vizinhos", nome: "Vizinhos (n±1) no último" },
+  { id: "linha", nome: "Linha do volante (20, z)" },
+  { id: "coluna", nome: "Coluna do volante (20, z)" },
+  { id: "knn", nome: "Similaridade histórica KNN (z)" },
+  { id: "bocpd", nome: "Regime (BOCPD)" }
 ];
-var IDX = Object.fromEntries(CARACTERISTICAS.map((c, i) => [c.id, i]));
 var K = CARACTERISTICAS.length;
-var FAMILIAS = [
-  { id: "nulo", nome: "Nulo (acaso puro, 60%)", usa: [] },
-  { id: "freqLonga", nome: "Frequência de longo prazo", usa: ["f500", "fTudo"] },
-  { id: "freqCurta", nome: 'Frequência recente ("quentes")', usa: ["f10", "f30", "f100"] },
-  { id: "tendencia", nome: "Tendência (EMA, momentum)", usa: ["ema", "momentum"] },
-  { id: "memoria", nome: "Memória (último, atraso, sequência)", usa: ["ultimo", "atraso", "sequencia"] },
-  { id: "markov", nome: "Markov e hazard", usa: ["markov1", "markov2", "hazard"] },
-  { id: "pares", nome: "Pares", usa: ["pares"] },
-  { id: "similaridade", nome: "Similaridade histórica (KNN)", usa: ["knn"] },
-  { id: "volante", nome: "Estrutura do volante (linha, coluna)", usa: ["linha", "coluna"] },
-  { id: "todos", nome: "Todas as características", usa: CARACTERISTICAS.map((c) => c.id) }
-];
-var FAMILIAS_SINAL = FAMILIAS.filter((f) => f.usa.length).map((f) => f.id);
-var TAXAS = [3e-3, 0.02];
-var ESQUECIMENTO = 0.998;
-var LIMITE_QUARENTENA = 2;
-var emQuarentena2 = (estado, m) => {
-  if (m.nulo) return false;
-  const nulo = estado.modelos.find((x) => x.nulo);
-  return m.perda - nulo.perda > LIMITE_QUARENTENA;
-};
-var JANELA_KNN = 1500;
-var VIZINHOS_KNN = 40;
-var MAX_GAP = 12;
+var IDX = Object.fromEntries(CARACTERISTICAS.map((c, i) => [c.id, i]));
+var JANELAS = [5, 10, 20, 50, 100, 200, 500];
+var P03 = 0.6;
+var VAR0 = 0.24;
 var popcount = (x) => {
   x -= x >>> 1 & 1431655765;
   x = (x & 858993459) + (x >>> 2 & 858993459);
   return (x + (x >>> 4) & 252645135) * 16843009 >>> 24;
 };
-function criarEstado2(familiasAtivas = null) {
-  const ativa = (f) => !f.usa.length || !familiasAtivas || familiasAtivas.has(f.id);
+var logit2 = (p) => Math.log(p / (1 - p));
+function criarBOCPD(R = 300, hazard = 1 / 400) {
+  const mk = () => ({ P: new Float64Array(R + 1), A: new Float64Array(R + 1), B: new Float64Array(R + 1) });
+  const b = { cur: mk(), nxt: mk(), R, H: hazard, n: 1 };
+  b.cur.P[0] = 1;
+  b.cur.A[0] = 6;
+  b.cur.B[0] = 4;
+  return b;
+}
+function idadeBOCPD(b) {
+  let e = 0;
+  for (let r = 0; r < b.n; r++) e += b.cur.P[r] * r;
+  return e;
+}
+function preditivaBOCPD(b) {
+  const { P: P2, A, B } = b.cur;
+  let p = 0;
+  for (let r = 0; r < b.n; r++) p += P2[r] * (A[r] / (A[r] + B[r]));
+  return p;
+}
+function atualizarBOCPD(b, y) {
+  const { R, H } = b, c = b.cur, x = b.nxt;
+  const nn = Math.min(b.n + 1, R + 1);
+  x.P.fill(0, 0, nn);
+  let cp = 0;
+  for (let r = 0; r < b.n; r++) {
+    const pr = c.A[r] / (c.A[r] + c.B[r]);
+    const m = c.P[r] * (y ? pr : 1 - pr);
+    cp += m * H;
+    const k = Math.min(r + 1, R);
+    if (k < R || x.P[k] === 0) {
+      x.A[k] = c.A[r] + y;
+      x.B[k] = c.B[r] + 1 - y;
+    }
+    x.P[k] += m * (1 - H);
+  }
+  x.P[0] = cp;
+  x.A[0] = 6;
+  x.B[0] = 4;
+  let s = 0;
+  for (let r = 0; r < nn; r++) s += x.P[r];
+  for (let r = 0; r < nn; r++) x.P[r] /= s;
+  b.cur = x;
+  b.nxt = c;
+  b.n = nn;
+  return cp / s;
+}
+function construirBanco(sorteios) {
+  const T2 = sorteios.length;
+  const X = new Float32Array((T2 + 1) * 26 * K);
+  const idadeRegime = new Float32Array(26);
+  const C = Array.from({ length: 26 }, () => new Int32Array(T2 + 1));
+  const linhaP = Array.from({ length: 5 }, () => new Int32Array(T2 + 1)), colP = Array.from({ length: 5 }, () => new Int32Array(T2 + 1));
+  const ema = [0.05, 0.1, 0.2].map(() => new Float64Array(26).fill(P03));
+  const ultimoVisto = new Int32Array(26).fill(-1), seq = new Int32Array(26);
+  const trans1 = Array.from({ length: 26 }, () => [[0, 0], [0, 0]]), trans2 = Array.from({ length: 26 }, () => [[0, 0], [0, 0], [0, 0], [0, 0]]);
+  const MAXG = 15, hazard = Array.from({ length: MAXG + 1 }, () => [0, 0]);
+  const cooc = Array.from({ length: 26 }, () => new Float64Array(26)), cont = new Float64Array(26);
+  const mascaras = new Int32Array(T2), conjuntos = sorteios.map((d) => new Set(d));
+  const bocpd = Array.from({ length: 26 }, () => criarBOCPD());
+  const mudanca = new Float32Array(T2 * 26);
+  const suav = ([v, s], f = 20) => (s + f * P03) / (v + f);
+  const emaSd = (a) => Math.sqrt(VAR0 * a / (2 - a));
+  for (let t = 0; t <= T2; t++) {
+    const ult = conjuntos[t - 1], pen = conjuntos[t - 2];
+    const knn = new Float64Array(26);
+    let nViz = 0;
+    if (t > 60) {
+      const alvo = mascaras[t - 1], cand = [];
+      for (let i = Math.max(0, t - 1501); i < t - 1; i++) cand.push(popcount(mascaras[i] & alvo) << 16 | i);
+      cand.sort((a, b) => b - a);
+      nViz = Math.min(40, cand.length);
+      for (let k = 0; k < nViz; k++) for (const n of sorteios[(cand[k] & 65535) + 1]) knn[n]++;
+    }
+    const j20 = Math.min(20, t);
+    for (let n = 1; n <= 25; n++) {
+      const o = (t * 26 + n) * K;
+      JANELAS.forEach((w, k) => {
+        const ww = Math.min(w, t);
+        X[o + k] = ww ? ((C[n][t] - C[n][t - ww]) / ww - P03) / Math.sqrt(VAR0 / ww) : 0;
+      });
+      X[o + IDX.zTudo] = t ? (C[n][t] / t - P03) / Math.sqrt(VAR0 / t) : 0;
+      X[o + IDX.ema05] = (ema[0][n] - P03) / emaSd(0.05);
+      X[o + IDX.ema10] = (ema[1][n] - P03) / emaSd(0.1);
+      X[o + IDX.ema20] = (ema[2][n] - P03) / emaSd(0.2);
+      X[o + IDX.momentum] = (ema[2][n] - ema[0][n]) / emaSd(0.2);
+      X[o + IDX.ultimo] = ult ? (ult.has(n) ? 1 : -1.5) * 0.8 : 0;
+      X[o + IDX.penultimo] = pen ? (pen.has(n) ? 1 : -1.5) * 0.8 : 0;
+      const gap = ultimoVisto[n] < 0 ? 0 : t - 1 - ultimoVisto[n];
+      X[o + IDX.atraso] = (Math.log1p(gap) - 0.45) * 2;
+      X[o + IDX.atrasoRaro] = (gap * Math.log(1 / 0.4) - 0.6) / 1.2;
+      X[o + IDX.sequencia] = (Math.min(seq[n], 10) - 1.5) / 1.5;
+      if (ult) X[o + IDX.markov1] = (suav(trans1[n][ult.has(n) ? 1 : 0]) - P03) * 12;
+      if (pen) X[o + IDX.markov2] = (suav(trans2[n][(pen.has(n) ? 2 : 0) + (ult.has(n) ? 1 : 0)]) - P03) * 12;
+      if (t > 20) X[o + IDX.hazard] = (suav(hazard[Math.min(gap, MAXG)], 50) - P03) * 12;
+      if (ult && t > 20) {
+        let s2 = 0, m = 0;
+        for (const j of ult) {
+          if (j === n || !cont[j]) continue;
+          s2 += cooc[n][j] / cont[j] - 14 / 24;
+          m++;
+        }
+        X[o + IDX.pares] = m ? s2 / m * 25 : 0;
+        const viz = (n > 1 && ult.has(n - 1) ? 1 : 0) + (n < 25 && ult.has(n + 1) ? 1 : 0), nv = (n > 1) + (n < 25);
+        X[o + IDX.vizinhos] = (viz - nv * P03) / Math.sqrt(nv * VAR0);
+      }
+      if (j20) {
+        const l = Math.floor((n - 1) / 5), c = (n - 1) % 5;
+        X[o + IDX.linha] = ((linhaP[l][t] - linhaP[l][t - j20]) / (j20 * 5) - P03) / Math.sqrt(VAR0 / (j20 * 5));
+        X[o + IDX.coluna] = ((colP[c][t] - colP[c][t - j20]) / (j20 * 5) - P03) / Math.sqrt(VAR0 / (j20 * 5));
+      }
+      if (nViz) X[o + IDX.knn] = (knn[n] / nViz - P03) / Math.sqrt(VAR0 / nViz);
+      X[o + IDX.bocpd] = (logit2(Math.min(0.95, Math.max(0.05, preditivaBOCPD(bocpd[n])))) - logit2(P03)) * 6;
+    }
+    if (t === T2) break;
+    const d = sorteios[t], s = conjuntos[t];
+    for (let n = 1; n <= 25; n++) {
+      const y = s.has(n) ? 1 : 0;
+      C[n][t + 1] = C[n][t] + y;
+      ema.forEach((e, k) => {
+        e[n] += [0.05, 0.1, 0.2][k] * (y - e[n]);
+      });
+      if (ult) {
+        const tr = trans1[n][ult.has(n) ? 1 : 0];
+        tr[0]++;
+        tr[1] += y;
+      }
+      if (pen) {
+        const tr = trans2[n][(pen.has(n) ? 2 : 0) + (ult.has(n) ? 1 : 0)];
+        tr[0]++;
+        tr[1] += y;
+      }
+      if (t > 0) {
+        const g = ultimoVisto[n] < 0 ? MAXG : Math.min(MAXG, t - 1 - ultimoVisto[n]);
+        hazard[g][0]++;
+        hazard[g][1] += y;
+      }
+      mudanca[t * 26 + n] = atualizarBOCPD(bocpd[n], y);
+    }
+    for (let l = 0; l < 5; l++) {
+      linhaP[l][t + 1] = linhaP[l][t];
+      colP[l][t + 1] = colP[l][t];
+    }
+    for (const n of d) {
+      linhaP[Math.floor((n - 1) / 5)][t + 1]++;
+      colP[(n - 1) % 5][t + 1]++;
+      cont[n]++;
+      seq[n] = ultimoVisto[n] === t - 1 ? seq[n] + 1 : 1;
+      ultimoVisto[n] = t;
+      for (const j of d) if (j !== n) cooc[n][j]++;
+    }
+    for (let n = 1; n <= 25; n++) if (!s.has(n)) seq[n] = 0;
+    mascaras[t] = d.reduce((m, n) => m | 1 << n - 1, 0);
+  }
+  for (let n = 1; n <= 25; n++) idadeRegime[n] = idadeBOCPD(bocpd[n]);
+  return { X, T: T2, mudanca, idadeRegime, conjuntos, sorteios };
+}
+
+// src/quantico/boltzmann.js
+var sig = (z) => 1 / (1 + Math.exp(-z));
+function criarBoltzmann({ alfa = 0.1, c = 3, l2 = 1, lrH = 0.02 } = {}) {
+  const M = () => Array.from({ length: 26 }, () => new Float64Array(26));
   return {
-    t: 0,
-    historico: [],
-    mascaras: [],
-    cont: new Float64Array(26),
-    ultimoVisto: new Int32Array(26).fill(-1),
-    seq: new Int32Array(26),
-    cooc: Array.from({ length: 26 }, () => new Float64Array(26)),
-    emaLenta: new Float64Array(26).fill(0.6),
-    emaMedia: new Float64Array(26).fill(0.6),
-    emaRapida: new Float64Array(26).fill(0.6),
-    // Markov por dezena: trans1[n][estadoAnterior] = [vezes, saiu]; trans2 com 4 estados.
-    trans1: Array.from({ length: 26 }, () => [[0, 0], [0, 0]]),
-    trans2: Array.from({ length: 26 }, () => [[0, 0], [0, 0], [0, 0], [0, 0]]),
-    hazard: Array.from({ length: MAX_GAP + 1 }, () => [0, 0]),
-    modelos: FAMILIAS.filter(ativa).flatMap((f) => f.usa.length ? TAXAS.map((lr) => ({ familia: f.id, lr, usa: f.usa.map((u) => IDX[u]), w: new Float64Array(K + 1), g2: new Float64Array(K + 1).fill(1e-8), perda: 0, perdaTotal: 0 })) : [{ familia: f.id, nulo: true, perda: 0, perdaTotal: 0 }])
+    h: new Float64Array(26),
+    J: M(),
+    K: M(),
+    gH: new Float64Array(26).fill(1e-8),
+    zJ: M(),
+    nJ: M(),
+    zK: M(),
+    nK: M(),
+    alfa,
+    c,
+    l2,
+    lrH,
+    t: 0
   };
 }
-function freqJanela(estado, n, janela) {
-  const h = estado.historico, ini = Math.max(0, h.length - janela);
-  if (h.length - ini < 1) return 0;
-  let c = 0;
-  for (let i = ini; i < h.length; i++) if (h[i].has(n)) c++;
-  return c / (h.length - ini) - 0.6;
+function campoExterno(b, y) {
+  const f = new Float64Array(26);
+  for (let i = 1; i <= 25; i++) {
+    let s = b.h[i];
+    if (y) for (const j of y) s += b.K[i][j];
+    f[i] = s;
+  }
+  return f;
 }
-var taxaSuavizada = ([vezes, saiu], forca = 20) => (saiu + forca * 0.6) / (vezes + forca) - 0.6;
-var gapDe = (estado, n) => estado.ultimoVisto[n] < 0 ? MAX_GAP : Math.min(MAX_GAP, estado.t - 1 - estado.ultimoVisto[n]);
-function caracteristicas(estado) {
-  const X = Array.from({ length: 26 }, () => new Float64Array(K));
-  const h = estado.historico, t = estado.t, ultimo = h[t - 1], penultimo = h[t - 2];
-  const knn = new Float64Array(26);
-  if (t > 60) {
-    const alvo = estado.mascaras[t - 1], cand = [];
-    for (let i = Math.max(0, t - 1 - JANELA_KNN); i < t - 1; i++) cand.push([popcount(estado.mascaras[i] & alvo), i]);
-    cand.sort((a, b) => b[0] - a[0]);
-    const viz = cand.slice(0, VIZINHOS_KNN);
-    for (const [, i] of viz) for (const n of h[i + 1]) knn[n]++;
-    for (let n = 1; n <= 25; n++) knn[n] = knn[n] / viz.length - 0.6;
+function marginais(b, y) {
+  const ext = campoExterno(b, y);
+  const m = new Float64Array(26).fill(0.6);
+  for (let it = 0; it < 25; it++) {
+    const campo = new Float64Array(26);
+    for (let i = 1; i <= 25; i++) {
+      let s = ext[i];
+      for (let j = 1; j <= 25; j++) if (j !== i) s += b.J[i][j] * m[j];
+      campo[i] = s;
+    }
+    let lo = -30, hi = 30;
+    for (let q = 0; q < 50; q++) {
+      const mu2 = (lo + hi) / 2;
+      let soma = 0;
+      for (let i = 1; i <= 25; i++) soma += sig(campo[i] + mu2);
+      if (soma > 15) hi = mu2;
+      else lo = mu2;
+    }
+    const mu = (lo + hi) / 2;
+    let mudou = 0;
+    for (let i = 1; i <= 25; i++) {
+      const novo = 0.5 * m[i] + 0.5 * sig(campo[i] + mu);
+      mudou += Math.abs(novo - m[i]);
+      m[i] = novo;
+    }
+    if (mudou < 1e-7) break;
   }
-  const linhaC = new Float64Array(5), colC = new Float64Array(5), j20 = Math.min(20, t);
-  for (let i = t - j20; i < t; i++) for (const n of h[i]) {
-    linhaC[Math.floor((n - 1) / 5)]++;
-    colC[(n - 1) % 5]++;
+  return m;
+}
+function ftrl(b, W, Z, N, i, j, gPerda) {
+  const n0 = N[i][j], w = W[i][j];
+  const sigma = (Math.sqrt(n0 + gPerda * gPerda) - Math.sqrt(n0)) / b.alfa;
+  Z[i][j] += gPerda - sigma * w;
+  N[i][j] = n0 + gPerda * gPerda;
+  const z = Z[i][j], n = N[i][j], limiar = b.c * Math.sqrt(n);
+  return Math.abs(z) <= limiar ? 0 : -(z - Math.sign(z) * limiar) / ((1 + Math.sqrt(n)) / b.alfa + b.l2);
+}
+function aprenderBoltzmann(b, x, y, mPronto = null) {
+  const m = mPronto || marginais(b, y);
+  const xs = new Set(x);
+  const v = new Float64Array(26);
+  let V = 0;
+  for (let i = 1; i <= 25; i++) {
+    v[i] = m[i] * (1 - m[i]);
+    V += v[i];
   }
-  for (let n = 1; n <= 25; n++) {
-    const x = X[n];
-    x[IDX.f10] = freqJanela(estado, n, 10) * 3;
-    x[IDX.f30] = freqJanela(estado, n, 30) * 5;
-    x[IDX.f100] = freqJanela(estado, n, 100) * 8;
-    x[IDX.f500] = freqJanela(estado, n, 500) * 15;
-    x[IDX.fTudo] = t ? (estado.cont[n] / t - 0.6) * 25 : 0;
-    x[IDX.ema] = (estado.emaMedia[n] - 0.6) * 5;
-    x[IDX.momentum] = (estado.emaRapida[n] - estado.emaLenta[n]) * 4;
-    x[IDX.ultimo] = ultimo ? ultimo.has(n) ? 0.4 : -0.6 : 0;
-    x[IDX.atraso] = Math.log1p(estado.ultimoVisto[n] < 0 ? 0 : t - 1 - estado.ultimoVisto[n]) - 0.4;
-    x[IDX.sequencia] = Math.min(estado.seq[n], 10) / 3 - 0.8;
-    if (ultimo) x[IDX.markov1] = taxaSuavizada(estado.trans1[n][ultimo.has(n) ? 1 : 0]) * 10;
-    if (penultimo) x[IDX.markov2] = taxaSuavizada(estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)]) * 10;
-    if (t > 20) x[IDX.hazard] = taxaSuavizada(estado.hazard[gapDe(estado, n)], 50) * 10;
-    if (ultimo && t > 20) {
-      let s = 0, m = 0;
-      for (const j of ultimo) {
-        if (j === n || !estado.cont[j]) continue;
-        s += estado.cooc[n][j] / estado.cont[j] - 14 / 24;
-        m++;
+  for (let i = 1; i <= 25; i++) {
+    const xi = xs.has(i) ? 1 : 0, g = xi - m[i];
+    b.gH[i] += g * g;
+    b.h[i] += b.lrH / Math.sqrt(b.gH[i]) * g;
+    if (y) for (const j of y) b.K[i][j] = ftrl(b, b.K, b.zK, b.nK, i, j, -g);
+    for (let j = i + 1; j <= 25; j++) {
+      const gJ = (xi && xs.has(j) ? 1 : 0) - (m[i] * m[j] - v[i] * v[j] / V);
+      b.J[i][j] = b.J[j][i] = ftrl(b, b.J, b.zJ, b.nJ, i, j, -gJ);
+    }
+  }
+  b.t++;
+}
+function acoplamentosFortes(b, quantos = 8) {
+  const J = [], K2 = [];
+  for (let i = 1; i <= 25; i++) for (let j = 1; j <= 25; j++) {
+    if (j > i && b.J[i][j]) J.push({ a: i, b: j, valor: b.J[i][j] });
+    if (b.K[i][j]) K2.push({ de: j, para: i, valor: b.K[i][j] });
+  }
+  J.sort((x, y) => Math.abs(y.valor) - Math.abs(x.valor));
+  K2.sort((x, y) => Math.abs(y.valor) - Math.abs(x.valor));
+  return { J: J.slice(0, quantos), K: K2.slice(0, quantos), nJ: J.length, nK: K2.length, h: Array.from(b.h) };
+}
+
+// src/quantico/especialistas.js
+var L0 = logit(0.6);
+var linha = (X, t, n) => (t * 26 + n) * K;
+function nulo() {
+  return { tipo: "nulo", prever: () => new Array(26).fill(0.6), aprender() {
+  } };
+}
+function logistico(feats, { lr = 0.03, l2 = 1e-3 } = {}) {
+  const w = new Float64Array(feats.length), g2 = new Float64Array(feats.length).fill(1e-8);
+  let b = 0, gb = 1e-8;
+  const logits = (X, t) => {
+    const s = [];
+    for (let n = 1; n <= 25; n++) {
+      const o = linha(X, t, n);
+      let z = L0 + b;
+      feats.forEach((k, i) => {
+        z += w[i] * X[o + k];
+      });
+      s.push(z);
+    }
+    return s;
+  };
+  return {
+    tipo: "logistico",
+    feats,
+    lr,
+    l2,
+    w,
+    prever(X, t) {
+      return [0, ...calibrarSoma15(logits(X, t))];
+    },
+    aprender(X, t, sorteado, p) {
+      const g = new Float64Array(feats.length);
+      let gbias = 0;
+      for (let n = 1; n <= 25; n++) {
+        const e = p[n] - (sorteado.has(n) ? 1 : 0), o = linha(X, t, n);
+        feats.forEach((k, i) => {
+          g[i] += e * X[o + k];
+        });
+        gbias += e;
       }
-      x[IDX.pares] = m ? s / m * 20 : 0;
+      feats.forEach((_, i) => {
+        g[i] += l2 * w[i] * 25;
+        g2[i] += g[i] * g[i];
+        w[i] -= lr / Math.sqrt(g2[i]) * g[i];
+      });
+      gb += gbias * gbias;
+      b -= lr / Math.sqrt(gb) * gbias;
     }
-    x[IDX.knn] = knn[n] * 6;
-    if (j20) {
-      x[IDX.linha] = (linhaC[Math.floor((n - 1) / 5)] / (j20 * 5) - 0.6) * 8;
-      x[IDX.coluna] = (colC[(n - 1) % 5] / (j20 * 5) - 0.6) * 8;
+  };
+}
+function neural({ ocultos = 10, lr = 0.01, l2 = 5e-4, semente = 31 } = {}) {
+  const r = rng(semente), H = ocultos;
+  const W1 = Array.from({ length: H }, () => Float64Array.from({ length: K }, () => (r() - 0.5) * 0.2));
+  const b1 = new Float64Array(H), W2 = Float64Array.from({ length: H }, () => (r() - 0.5) * 0.02);
+  const g1 = Array.from({ length: H }, () => new Float64Array(K).fill(1e-8)), gb1 = new Float64Array(H).fill(1e-8), g2 = new Float64Array(H).fill(1e-8);
+  let b2 = 0, gb2 = 1e-8;
+  const frente = (X, o) => {
+    const a = new Float64Array(H);
+    for (let h = 0; h < H; h++) {
+      let s = b1[h];
+      for (let k = 0; k < K; k++) s += W1[h][k] * X[o + k];
+      a[h] = Math.tanh(s);
     }
-  }
-  return X;
+    let z = L0 + b2;
+    for (let h = 0; h < H; h++) z += W2[h] * a[h];
+    return { a, z };
+  };
+  return {
+    tipo: "neural",
+    prever(X, t) {
+      const s = [];
+      for (let n = 1; n <= 25; n++) s.push(frente(X, linha(X, t, n)).z);
+      return [0, ...calibrarSoma15(s)];
+    },
+    aprender(X, t, sorteado, p) {
+      const dW1 = Array.from({ length: H }, () => new Float64Array(K)), db1 = new Float64Array(H), dW2 = new Float64Array(H);
+      let db2 = 0;
+      for (let n = 1; n <= 25; n++) {
+        const o = linha(X, t, n), { a } = frente(X, o), e = p[n] - (sorteado.has(n) ? 1 : 0);
+        db2 += e;
+        for (let h = 0; h < H; h++) {
+          dW2[h] += e * a[h];
+          const d = e * W2[h] * (1 - a[h] * a[h]);
+          db1[h] += d;
+          for (let k = 0; k < K; k++) dW1[h][k] += d * X[o + k];
+        }
+      }
+      for (let h = 0; h < H; h++) {
+        dW2[h] += l2 * W2[h] * 25;
+        g2[h] += dW2[h] ** 2;
+        W2[h] -= lr / Math.sqrt(g2[h]) * dW2[h];
+        gb1[h] += db1[h] ** 2;
+        b1[h] -= lr / Math.sqrt(gb1[h]) * db1[h];
+        for (let k = 0; k < K; k++) {
+          const d = dW1[h][k] + l2 * W1[h][k] * 25;
+          g1[h][k] += d * d;
+          W1[h][k] -= lr / Math.sqrt(g1[h][k]) * d;
+        }
+      }
+      gb2 += db2 * db2;
+      b2 -= lr / Math.sqrt(gb2) * db2;
+    }
+  };
 }
-function probsModelo(mod, X) {
-  if (mod.nulo) return new Array(26).fill(0.6);
-  const s = [];
-  for (let n = 1; n <= 25; n++) {
-    let z = mod.w[K];
-    for (const k of mod.usa) z += mod.w[k] * X[n][k];
-    s.push(logit(0.6) + z);
-  }
-  return [0, ...calibrarSoma15(s)];
+function regime() {
+  const esp = logistico([IDX.bocpd, IDX.zTudo], { lr: 0.01, l2: 0.01 });
+  return { ...esp, tipo: "regime" };
 }
-function perdaLog2(p, sorteado) {
-  let s = 0;
+function boltzmann(ctx) {
+  const b = criarBoltzmann();
+  let cache = null;
+  return {
+    tipo: "boltzmann",
+    maquina: b,
+    prever(X, t) {
+      const m = marginais(b, ctx.sorteios[t - 1] || null);
+      cache = { t, m };
+      return [0, ...Array.from(m).slice(1)];
+    },
+    aprender(X, t) {
+      aprenderBoltzmann(b, ctx.sorteios[t], ctx.sorteios[t - 1] || null, cache?.t === t ? cache.m : null);
+    }
+  };
+}
+
+// src/quantico/evolucao.js
+var LRS = [0.01, 0.03, 0.1];
+var L2S = [0, 1e-3, 0.01];
+var descreverGenoma = (g) => `${g.feats.map((k) => CARACTERISTICAS[k].id).join("+")} · lr ${g.lr}${g.l2 ? ` · L2 ${g.l2}` : ""}`;
+var chave = (g) => `${[...g.feats].sort((a, b) => a - b).join(",")}|${g.lr}|${g.l2}`;
+function aleatorio(r) {
+  const n = 1 + Math.floor(r() * 4), feats = /* @__PURE__ */ new Set();
+  while (feats.size < n) feats.add(Math.floor(r() * K));
+  return { feats: [...feats], lr: LRS[Math.floor(r() * 3)], l2: L2S[Math.floor(r() * 3)] };
+}
+function mutar(g, r) {
+  const f = new Set(g.feats);
+  const op = r();
+  if (op < 0.35 && f.size < 6) f.add(Math.floor(r() * K));
+  else if (op < 0.6 && f.size > 1) f.delete([...f][Math.floor(r() * f.size)]);
+  else {
+    if (f.size > 1) f.delete([...f][Math.floor(r() * f.size)]);
+    f.add(Math.floor(r() * K));
+  }
+  return { feats: [...f], lr: r() < 0.3 ? LRS[Math.floor(r() * 3)] : g.lr, l2: r() < 0.3 ? L2S[Math.floor(r() * 3)] : g.l2 };
+}
+function cruzar(a, b, r) {
+  const todas = [.../* @__PURE__ */ new Set([...a.feats, ...b.feats])];
+  const feats = todas.filter(() => r() < 0.6);
+  if (!feats.length) feats.push(todas[Math.floor(r() * todas.length)]);
+  return { feats: feats.slice(0, 6), lr: r() < 0.5 ? a.lr : b.lr, l2: r() < 0.5 ? a.l2 : b.l2 };
+}
+function avaliar(g, X, conjuntos, t0, tMeio, t1) {
+  const esp = logistico(g.feats, { lr: g.lr, l2: g.l2 });
+  let gTreino = 0, gVal = 0;
+  const lnulo1 = Math.log(0.6), lnulo0 = Math.log(0.4);
+  for (let t = t0; t < t1; t++) {
+    const p = esp.prever(X, t), s = conjuntos[t];
+    let ganho = 0;
+    for (let n = 1; n <= 25; n++) ganho += s.has(n) ? Math.log(p[n]) - lnulo1 : Math.log(1 - p[n]) - lnulo0;
+    if (t < tMeio) gTreino += ganho;
+    else gVal += ganho;
+    esp.aprender(X, t, s, p);
+  }
+  return { treino: gTreino / (tMeio - t0), validacao: gVal / (t1 - tMeio), esp };
+}
+function evoluir({ X, conjuntos, t, janela = 600, validacao = 150, populacao = 18, geracoes = 3, elite = [], semente = 1 }) {
+  const r = rng(semente * 7919 + t);
+  const t0 = Math.max(0, t - janela), tMeio = t - validacao;
+  const vistos = /* @__PURE__ */ new Map();
+  const aval = (g) => {
+    const k = chave(g);
+    if (!vistos.has(k)) vistos.set(k, { g, ...avaliar(g, X, conjuntos, t0, tMeio, t) });
+    return vistos.get(k);
+  };
+  let pop = [...elite, ...Array.from({ length: populacao - elite.length }, () => aleatorio(r))].map(aval);
+  for (let ger = 0; ger < geracoes; ger++) {
+    pop.sort((a, b) => b.treino - a.treino);
+    const pais = pop.slice(0, 6);
+    const filhos = [];
+    while (filhos.length < populacao - pais.length) {
+      const a = pais[Math.floor(r() * pais.length)].g, b = pais[Math.floor(r() * pais.length)].g;
+      filhos.push(r() < 0.5 ? mutar(a, r) : mutar(cruzar(a, b, r), r));
+    }
+    pop = [...pais, ...filhos.map(aval)];
+  }
+  pop.sort((a, b) => b.treino - a.treino);
+  const promovidos = pop.filter((x) => x.treino > 0 && x.validacao > 0).slice(0, 3);
+  return { avaliados: vistos.size, melhor: pop[0], promovidos, rejeitados: pop.slice(0, 3).filter((x) => !promovidos.includes(x)) };
+}
+
+// src/quantico/motor.js
+var F = (ids) => ids.map((id) => IDX[id]);
+var FAMILIAS = [
+  { id: "nulo", nome: "Nulo (acaso puro, 60%)" },
+  { id: "freqLonga", nome: "Frequência de longo prazo", feats: F(["z500", "zTudo"]) },
+  { id: "freqCurta", nome: 'Frequência recente ("quentes")', feats: F(["z5", "z10", "z20", "z50", "z100"]) },
+  { id: "tendencia", nome: "Tendência (EMAs, momentum)", feats: F(["ema05", "ema10", "ema20", "momentum"]) },
+  { id: "memoria", nome: "Memória (último, atraso, sequência)", feats: F(["ultimo", "penultimo", "atraso", "atrasoRaro", "sequencia"]) },
+  { id: "markov", nome: "Markov e hazard", feats: F(["markov1", "markov2", "hazard"]) },
+  { id: "pares", nome: "Pares e vizinhança", feats: F(["pares", "vizinhos"]) },
+  { id: "similaridade", nome: "Similaridade histórica (KNN)", feats: F(["knn"]) },
+  { id: "volante", nome: "Estrutura do volante", feats: F(["linha", "coluna"]) },
+  { id: "todos", nome: "Logística com todas as características", feats: CARACTERISTICAS.map((_, i) => i) },
+  { id: "regime", nome: "Regimes (BOCPD)" },
+  { id: "boltzmann", nome: "Máquina de Boltzmann (Ising)" },
+  { id: "neural", nome: "Rede neural online" },
+  { id: "evolucao", nome: "Especialistas evoluídos (genético)" }
+];
+var FAMILIAS_SINAL = FAMILIAS.filter((f) => f.id !== "nulo").map((f) => f.id);
+var BASELINES = { aleatorio: "Aleatório", frequencia: "Frequência simples (histórico todo)", bayes: "Frequência recente (200)", markov: "Markov simples (ordem 1)" };
+var ESQUECIMENTO = 0.998;
+var LIMITE_QUARENTENA = 2;
+var ALFA_FIXED_SHARE = 2e-3;
+var PASSO_EVOLUCAO = 300;
+var INICIO_EVOLUCAO = 600;
+var MAX_EVOLUIDOS = 4;
+function perdaLog2(p, s) {
+  let l = 0;
   for (let n = 1; n <= 25; n++) {
     const q = Math.min(1 - 1e-9, Math.max(1e-9, p[n]));
-    s -= sorteado.has(n) ? Math.log(q) : Math.log(1 - q);
+    l -= s.has(n) ? Math.log(q) : Math.log(1 - q);
   }
-  return s;
+  return l;
 }
-function pesosMistura2(estado, excluir = null) {
-  const ativos = estado.modelos.map((m) => m.familia !== excluir && !emQuarentena2(estado, m));
-  const M = ativos.filter(Boolean).length;
-  const min = Math.min(...estado.modelos.filter((_, i) => ativos[i]).map((m) => m.perda));
-  const w = estado.modelos.map((m, i) => ativos[i] ? (m.nulo ? 0.5 : 0.5 / Math.max(1, M - 1)) * Math.exp(-(m.perda - min)) : 0);
-  const soma = w.reduce((a, b) => a + b, 0);
-  return w.map((x) => x / soma);
-}
-function pesosPorFamilia(estado, excluir = null) {
-  const w = pesosMistura2(estado, excluir), porFamilia = {};
-  estado.modelos.forEach((m, i) => {
-    porFamilia[m.familia] = (porFamilia[m.familia] || 0) + w[i];
+function criarEstado2(familiasAtivas = null, ctx = { sorteios: [] }, banco = null) {
+  const ativa = (id) => id === "nulo" || !familiasAtivas || familiasAtivas.has(id);
+  const esp = [];
+  const add = (familia, nome, obj) => esp.push({ familia, nome, esp: obj, logw: 0, perda: 0, perdaTotal: 0, nulo: familia === "nulo", criadoEm: 0 });
+  for (const f of FAMILIAS) {
+    if (!ativa(f.id) || f.id === "evolucao") continue;
+    if (f.id === "nulo") add("nulo", f.nome, nulo());
+    else if (f.feats) add(f.id, f.nome, logistico(f.feats, f.id === "todos" ? { lr: 0.01, l2: 0.02 } : { lr: 0.03, l2: 1e-3 }));
+    else if (f.id === "regime") add("regime", f.nome, regime());
+    else if (f.id === "boltzmann") add("boltzmann", f.nome, boltzmann(ctx));
+    else if (f.id === "neural") add("neural", f.nome, neural());
+  }
+  const M = esp.length;
+  esp.forEach((e) => {
+    e.logw = Math.log(e.nulo ? 0.5 : 0.5 / Math.max(1, M - 1));
   });
-  return porFamilia;
+  return { especialistas: esp, t: 0, ctx, banco, evolui: ativa("evolucao"), evolucoes: [] };
 }
-function prever2(estado, X = caracteristicas(estado), { excluir = null } = {}) {
+var emQuarentena2 = (estado, e) => {
+  if (e.nulo) return false;
+  const n = estado.especialistas.find((x) => x.nulo);
+  return e.perda - n.perda > LIMITE_QUARENTENA;
+};
+function pesosMistura2(estado, excluir = null) {
+  const es = estado.especialistas;
+  const ok = es.map((e) => e.familia !== excluir && !emQuarentena2(estado, e));
+  const max = Math.max(...es.filter((_, i) => ok[i]).map((e) => e.logw));
+  const w = es.map((e, i) => ok[i] ? Math.exp(e.logw - max) : 0);
+  const s = w.reduce((a, b) => a + b, 0);
+  return w.map((x) => x / s);
+}
+function previsoesIndividuais(estado, t) {
+  return estado.especialistas.map((e) => e.esp.prever(estado.banco.X, t));
+}
+function combinar(estado, preds, excluir = null) {
   const pesos = pesosMistura2(estado, excluir);
-  const p = new Array(26).fill(0);
-  const porFamilia = {};
-  estado.modelos.forEach((m, i) => {
-    if (pesos[i] < 1e-7) return;
-    const pm = probsModelo(m, X);
-    const f = porFamilia[m.familia] ||= { peso: 0, p: new Array(26).fill(0) };
+  const p = new Array(26).fill(0), porFamilia = {};
+  estado.especialistas.forEach((e, i) => {
+    const f = porFamilia[e.familia] ||= { peso: 0, p: new Array(26).fill(0) };
     f.peso += pesos[i];
+    if (pesos[i] < 1e-9) return;
     for (let n = 1; n <= 25; n++) {
-      p[n] += pesos[i] * pm[n];
-      f.p[n] += pesos[i] * pm[n];
+      p[n] += pesos[i] * preds[i][n];
+      f.p[n] += pesos[i] * preds[i][n];
     }
   });
-  const familias = pesosPorFamilia(estado, excluir);
+  const familias = {};
+  for (const [f, v] of Object.entries(porFamilia)) familias[f] = v.peso;
   return { probs: p, jogo: top15(p), confianca: 1 - (familias.nulo || 0), familias, porFamilia };
+}
+function prever2(estado, { excluir = null } = {}) {
+  return combinar(estado, previsoesIndividuais(estado, estado.t), excluir);
+}
+function aprender(estado, t, preds) {
+  const s = estado.banco.conjuntos[t];
+  const es = estado.especialistas;
+  es.forEach((e, i) => {
+    const l = perdaLog2(preds[i], s);
+    e.logw -= l;
+    e.perda = ESQUECIMENTO * e.perda + l;
+    e.perdaTotal += l;
+    e.esp.aprender(estado.banco.X, t, s, preds[i]);
+  });
+  const max = Math.max(...es.map((e) => e.logw));
+  const w = es.map((e) => Math.exp(e.logw - max));
+  const soma = w.reduce((a, b) => a + b, 0), M = es.length;
+  es.forEach((e, i) => {
+    const prior = e.nulo ? 0.5 : 0.5 / Math.max(1, M - 1);
+    e.logw = Math.log((1 - ALFA_FIXED_SHARE) * (w[i] / soma) + ALFA_FIXED_SHARE * prior);
+  });
+  estado.t = t + 1;
+}
+function cicloEvolucao(estado, t, concursos) {
+  const vivos = estado.especialistas.filter((e) => e.familia === "evolucao");
+  const r = evoluir({ X: estado.banco.X, conjuntos: estado.banco.conjuntos, t, elite: vivos.map((v) => v.genoma) });
+  const nulo2 = estado.especialistas.find((e) => e.nulo);
+  const promovidos = [];
+  for (const p of r.promovidos) {
+    const desc = descreverGenoma(p.g);
+    if (vivos.some((v) => v.nome === desc)) continue;
+    const max = Math.max(...estado.especialistas.map((e) => e.logw));
+    estado.especialistas.push({ familia: "evolucao", nome: desc, genoma: p.g, esp: p.esp, logw: max + Math.log(0.01), perda: nulo2.perda, perdaTotal: 0, criadoEm: t });
+    promovidos.push({ nome: desc, treino: p.treino, validacao: p.validacao });
+  }
+  let evoluidos = estado.especialistas.filter((e) => e.familia === "evolucao");
+  const removidos = [];
+  const tirar = (e) => {
+    estado.especialistas = estado.especialistas.filter((x) => x !== e);
+    removidos.push(e.nome);
+  };
+  evoluidos.filter((e) => emQuarentena2(estado, e)).forEach(tirar);
+  evoluidos = estado.especialistas.filter((e) => e.familia === "evolucao").sort((a, b) => a.perda - b.perda);
+  evoluidos.slice(MAX_EVOLUIDOS).forEach(tirar);
+  estado.evolucoes.push({
+    concurso: concursos ? concursos[t] : t + 1,
+    avaliados: r.avaliados,
+    melhor: { nome: descreverGenoma(r.melhor.g), treino: r.melhor.treino, validacao: r.melhor.validacao },
+    promovidos,
+    removidos,
+    rejeitados: r.rejeitados.map((x) => ({ nome: descreverGenoma(x.g), treino: x.treino, validacao: x.validacao })),
+    vivos: estado.especialistas.filter((e) => e.familia === "evolucao").length
+  });
+}
+function jogosBaseline(X, t) {
+  const r = rng(t + 1), freq = new Array(26), rec = new Array(26), mk = new Array(26);
+  for (let n = 1; n <= 25; n++) {
+    const o = (t * 26 + n) * K;
+    freq[n] = X[o + IDX.zTudo];
+    rec[n] = X[o + IDX.z200];
+    mk[n] = X[o + IDX.markov1];
+  }
+  return { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15), frequencia: top15(freq), bayes: top15(rec), markov: top15(mk) };
+}
+function iniciarReplay(sorteios, opcoes) {
+  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, banco = null, janelaRedundancia = 800 } = opcoes;
+  const ctx = { sorteios };
+  const bancoUsado = banco || construirBanco(sorteios);
+  const estado = criarEstado2(familiasAtivas, ctx, bancoUsado);
+  const res = {
+    acertos: [],
+    acertosBaseline: Object.fromEntries(Object.keys(BASELINES).map((b) => [b, []])),
+    registros: [],
+    pontos: [],
+    desvioFamilia: {},
+    perdaMistura: 0,
+    perdaNula: 0,
+    n: 0,
+    penultimaPrevisao: null,
+    estado
+  };
+  const T2 = sorteios.length;
+  const passo = (t) => {
+    const preds = previsoesIndividuais(estado, t);
+    if (t >= aquecimento) {
+      const prev = combinar(estado, preds);
+      const s = bancoUsado.conjuntos[t];
+      const a = prev.jogo.filter((x) => s.has(x)).length;
+      res.acertos.push(a);
+      res.perdaMistura += perdaLog2(prev.probs, s);
+      res.perdaNula += perdaLog2(new Array(26).fill(0.6), s);
+      res.n++;
+      if (guardarRegistros) res.registros.push({ concurso: concursos ? concursos[t] : t + 1, probs: prev.probs, sorteio: sorteios[t], jogo: prev.jogo, acertos: a });
+      if (baselines) {
+        const jb = jogosBaseline(bancoUsado.X, t);
+        for (const b of Object.keys(BASELINES)) res.acertosBaseline[b].push(jb[b].filter((x) => s.has(x)).length);
+      }
+      if (guardarRegistros && t >= T2 - janelaRedundancia) {
+        estado.especialistas.forEach((e, i) => {
+          if (e.nulo || e.familia === "evolucao") return;
+          const arr = res.desvioFamilia[e.familia] ||= [];
+          for (let k = 1; k <= 25; k++) arr.push(preds[i][k] - 0.6);
+        });
+      }
+      if (t === T2 - 1) res.penultimaPrevisao = prev;
+      if (t % 20 === 0) res.pontos.push({ rotulo: concursos ? concursos[t] : t + 1, valor: prev.confianca, familias: prev.familias });
+    }
+    aprender(estado, t, preds);
+    if (estado.evolui && t + 1 >= INICIO_EVOLUCAO && (t + 1 - INICIO_EVOLUCAO) % PASSO_EVOLUCAO === 0) cicloEvolucao(estado, t + 1, concursos);
+  };
+  const fim = () => {
+    res.ganho = res.n ? (res.perdaNula - res.perdaMistura) / res.n : 0;
+    return res;
+  };
+  return { passo, fim, T: T2 };
+}
+function simular2(sorteios, opcoes = {}) {
+  const r = iniciarReplay(sorteios, opcoes);
+  for (let t = 0; t < r.T; t++) r.passo(t);
+  return r.fim();
+}
+async function simularAsync(sorteios, opcoes = {}) {
+  const { onProgresso } = opcoes;
+  const r = iniciarReplay(sorteios, opcoes);
+  for (let t = 0; t < r.T; t++) {
+    r.passo(t);
+    if (t % 150 === 149) {
+      onProgresso?.(t + 1, r.T);
+      await new Promise((res) => setTimeout(res, 0));
+    }
+  }
+  onProgresso?.(r.T, r.T);
+  return r.fim();
+}
+function governanca(estado) {
+  const nulo2 = estado.especialistas.find((e) => e.nulo);
+  const linhas = FAMILIAS_SINAL.map((f) => {
+    const es = estado.especialistas.filter((e) => e.familia === f);
+    if (!es.length) return { familia: f, status: f === "evolucao" && estado.evolui ? "Aguardando" : "Desativada" };
+    const melhor = es.reduce((a, b) => b.perda < a.perda ? b : a);
+    return { familia: f, vantagemRecente: nulo2.perda - melhor.perda, vantagemTotal: nulo2.perdaTotal - Math.min(...es.map((e) => e.perdaTotal)), emSombra: es.every((e) => emQuarentena2(estado, e)), n: es.length };
+  });
+  const ativas = linhas.filter((l) => l.vantagemRecente != null);
+  const campea = ativas.reduce((a, b) => b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a, null);
+  for (const l of ativas) l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.emSombra ? "Quarantine" : "Watch";
+  return linhas;
+}
+function especialistasDetalhe(estado) {
+  const w = pesosMistura2(estado), nulo2 = estado.especialistas.find((e) => e.nulo);
+  return estado.especialistas.map((e, i) => ({ familia: e.familia, nome: e.nome, peso: w[i], vantagemRecente: nulo2.perda - e.perda, quarentena: emQuarentena2(estado, e), criadoEm: e.criadoEm }));
 }
 function explicarDezena(previsao, n) {
   return Object.entries(previsao.porFamilia).map(([familia, f]) => ({ familia, peso: f.peso, contribuicao: f.p[n] - f.peso * 0.6 })).sort((a, b) => Math.abs(b.contribuicao) - Math.abs(a.contribuicao));
 }
-function contrafactual(estado, X = caracteristicas(estado)) {
-  const base = prever2(estado, X);
-  return FAMILIAS_SINAL.filter((f) => estado.modelos.some((m) => m.familia === f)).map((f) => {
-    const sem = prever2(estado, X, { excluir: f });
+function contrafactual(estado) {
+  const preds = previsoesIndividuais(estado, estado.t);
+  const base = combinar(estado, preds);
+  return FAMILIAS_SINAL.filter((f) => estado.especialistas.some((e) => e.familia === f)).map((f) => {
+    const sem = combinar(estado, preds, f);
     const deltas = Array.from({ length: 26 }, (_, n) => n ? base.probs[n] - sem.probs[n] : 0);
-    const trocas = base.jogo.filter((n) => !sem.jogo.includes(n)).length;
-    return { familia: f, deltas, trocasNoJogo: trocas, maiorDelta: Math.max(...deltas.map(Math.abs)) };
+    return { familia: f, deltas, trocasNoJogo: base.jogo.filter((n) => !sem.jogo.includes(n)).length, maiorDelta: Math.max(...deltas.map(Math.abs)) };
   });
 }
-function governanca(estado) {
-  const nulo = estado.modelos.find((m) => m.nulo);
-  const linhas = FAMILIAS_SINAL.map((f) => {
-    const ms = estado.modelos.filter((m) => m.familia === f);
-    if (!ms.length) return { familia: f, status: "Desativada" };
-    const melhor = ms.reduce((a, b) => b.perda < a.perda ? b : a);
-    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...ms.map((m) => m.perdaTotal)), emSombra: ms.every((m) => emQuarentena2(estado, m)) };
-  });
-  const ativas = linhas.filter((l) => l.status !== "Desativada");
-  const campea = ativas.reduce((a, b) => b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a, null);
-  for (const l of ativas) {
-    l.status = l === campea && l.vantagemRecente > 2 ? "Champion" : l.vantagemRecente > 0 ? "Challenger" : l.emSombra ? "Quarantine" : "Watch";
-  }
-  return linhas;
-}
-function registrar2(estado, dezenas, X = caracteristicas(estado)) {
-  const sorteado = new Set(dezenas);
-  for (const m of estado.modelos) {
-    const p = probsModelo(m, X);
-    const l = perdaLog2(p, sorteado);
-    m.perda = ESQUECIMENTO * m.perda + l;
-    m.perdaTotal += l;
-    if (m.nulo) continue;
-    const g = new Float64Array(K + 1);
-    for (let n = 1; n <= 25; n++) {
-      const erro = p[n] - (sorteado.has(n) ? 1 : 0);
-      for (const k of m.usa) g[k] += erro * X[n][k];
-    }
-    for (const k of m.usa) {
-      m.g2[k] += g[k] * g[k];
-      m.w[k] -= m.lr / Math.sqrt(m.g2[k]) * g[k] * Math.sqrt(estado.t + 1) * 0.05;
-    }
-  }
-  const t = estado.t, ultimo = estado.historico[t - 1], penultimo = estado.historico[t - 2];
-  for (let n = 1; n <= 25; n++) {
-    const y = sorteado.has(n) ? 1 : 0;
-    if (ultimo) {
-      const tr = estado.trans1[n][ultimo.has(n) ? 1 : 0];
-      tr[0]++;
-      tr[1] += y;
-    }
-    if (penultimo) {
-      const tr = estado.trans2[n][(penultimo.has(n) ? 2 : 0) + (ultimo.has(n) ? 1 : 0)];
-      tr[0]++;
-      tr[1] += y;
-    }
-    if (t > 0) {
-      const hz = estado.hazard[gapDe(estado, n)];
-      hz[0]++;
-      hz[1] += y;
-    }
-    estado.emaLenta[n] += 0.05 * (y - estado.emaLenta[n]);
-    estado.emaMedia[n] += 0.1 * (y - estado.emaMedia[n]);
-    estado.emaRapida[n] += 0.2 * (y - estado.emaRapida[n]);
-  }
-  for (const n of dezenas) {
-    estado.cont[n]++;
-    estado.seq[n] = estado.ultimoVisto[n] === t - 1 ? estado.seq[n] + 1 : 1;
-    estado.ultimoVisto[n] = t;
-    for (const j of dezenas) if (j !== n) estado.cooc[n][j]++;
-  }
-  for (let n = 1; n <= 25; n++) if (!sorteado.has(n)) estado.seq[n] = 0;
-  estado.historico.push(sorteado);
-  estado.mascaras.push(dezenas.reduce((m, n) => m | 1 << n - 1, 0));
-  estado.t++;
-}
-var BASELINES = {
-  aleatorio: "Aleatório",
-  frequencia: "Frequência simples (histórico todo)",
-  bayes: "Bayes simples (Beta, últimos 200)",
-  markov: "Markov simples (ordem 1)"
-};
-function jogosBaseline(estado, i) {
-  const r = rng(i + 1);
-  const out = { aleatorio: embaralhar(Array.from({ length: 25 }, (_, k) => k + 1), r).slice(0, 15) };
-  const freq = new Array(26).fill(0), bayes = new Array(26).fill(0), markov = new Array(26).fill(0);
-  const h = estado.historico, ini = Math.max(0, h.length - 200), ult = h[h.length - 1];
-  for (let n = 1; n <= 25; n++) {
-    freq[n] = estado.t ? estado.cont[n] / estado.t : 0.6;
-    let c = 0;
-    for (let k = ini; k < h.length; k++) if (h[k].has(n)) c++;
-    bayes[n] = (c + 30 * 0.6) / (h.length - ini + 30);
-    const tr = ult ? estado.trans1[n][ult.has(n) ? 1 : 0] : [0, 0];
-    markov[n] = (tr[1] + 20 * 0.6) / (tr[0] + 20);
-  }
-  out.frequencia = top15(freq);
-  out.bayes = top15(bayes);
-  out.markov = top15(markov);
-  return out;
-}
-function simular2(sorteios, opcoes = {}) {
-  const { aquecimento = 200, concursos = null, familiasAtivas = null, guardarRegistros = true, baselines = guardarRegistros, janelaRedundancia = 800 } = opcoes;
-  const estado = criarEstado2(familiasAtivas);
-  const acertos2 = [], pontos = [], registros = [];
-  const acertosBaseline = Object.fromEntries(Object.keys(BASELINES).map((b) => [b, []]));
-  const desvioFamilia = {};
-  let perdaMistura = 0, perdaNula = 0, n = 0, penultimaPrevisao = null;
-  sorteios.forEach((dezenas, i) => {
-    const X = caracteristicas(estado);
-    if (i >= aquecimento) {
-      const prev = prever2(estado, X);
-      const s = new Set(dezenas);
-      const a = prev.jogo.filter((x) => s.has(x)).length;
-      acertos2.push(a);
-      perdaMistura += perdaLog2(prev.probs, s);
-      perdaNula += perdaLog2(new Array(26).fill(0.6), s);
-      n++;
-      if (guardarRegistros) registros.push({ concurso: concursos ? concursos[i] : i + 1, probs: prev.probs, sorteio: dezenas, jogo: prev.jogo, acertos: a });
-      if (baselines) {
-        const jb = jogosBaseline(estado, i);
-        for (const b of Object.keys(BASELINES)) acertosBaseline[b].push(jb[b].filter((x) => s.has(x)).length);
-      }
-      if (guardarRegistros && i >= sorteios.length - janelaRedundancia) {
-        for (const m of estado.modelos) {
-          if (m.nulo) continue;
-          const pm = probsModelo(m, X);
-          const arr = desvioFamilia[`${m.familia}|${m.lr}`] ||= [];
-          for (let k = 1; k <= 25; k++) arr.push(pm[k] - 0.6);
-        }
-      }
-      if (i === sorteios.length - 1) penultimaPrevisao = prev;
-      if (i % 20 === 0) pontos.push({ rotulo: concursos ? concursos[i] : i + 1, valor: prev.confianca, familias: prev.familias });
-    }
-    registrar2(estado, dezenas, X);
-  });
-  return { acertos: acertos2, acertosBaseline, desvioFamilia, penultimaPrevisao, ganho: n ? (perdaNula - perdaMistura) / n : 0, perdaMistura, perdaNula, n, pontos, registros, estado };
+function explicarEscolha(previsao, n) {
+  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
+  const posicao = ordem.indexOf(n) + 1;
+  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
+  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter((f) => f.familia !== "nulo").slice(0, 3) };
 }
 function redundanciaFamilias(res) {
-  const porFamilia = {};
-  for (const [k, v] of Object.entries(res.desvioFamilia)) {
-    const f = k.split("|")[0];
-    if (!porFamilia[f] || k.endsWith("|0.02")) porFamilia[f] = v;
-  }
-  const fams = Object.keys(porFamilia);
+  const fams = Object.keys(res.desvioFamilia);
   const corr = (a, b) => {
     const n = Math.min(a.length, b.length);
     let ma = 0, mb = 0;
@@ -6799,7 +7219,7 @@ function redundanciaFamilias(res) {
     }
     return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0;
   };
-  return { familias: fams, matriz: fams.map((a) => fams.map((b) => corr(porFamilia[a], porFamilia[b]))) };
+  return { familias: fams, matriz: fams.map((a) => fams.map((b) => corr(res.desvioFamilia[a], res.desvioFamilia[b]))) };
 }
 function resumoMudancas(res) {
   const antes = res.penultimaPrevisao, depois = prever2(res.estado);
@@ -6814,38 +7234,42 @@ function resumoMudancas(res) {
     maioresMudancas: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, delta: depois.probs[i + 1] - antes.probs[i + 1] })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5)
   };
 }
-function explicarEscolha(previsao, n) {
-  const ordem = Array.from({ length: 25 }, (_, i) => i + 1).sort((a, b) => previsao.probs[b] - previsao.probs[a]);
-  const posicao = ordem.indexOf(n) + 1;
-  const corte = (previsao.probs[ordem[14]] + previsao.probs[ordem[15]]) / 2;
-  return { posicao, entrou: posicao <= 15, margem: previsao.probs[n] - corte, familias: explicarDezena(previsao, n).filter((f) => f.familia !== "nulo").slice(0, 3) };
+function inspecionar(res) {
+  const bz = res.estado.especialistas.find((e) => e.familia === "boltzmann");
+  const banco = res.estado.banco;
+  const T2 = banco.T;
+  const recentes = Array.from({ length: 26 }, () => 0);
+  for (let t = Math.max(0, T2 - 200); t < T2; t++) for (let n = 1; n <= 25; n++) recentes[n] = Math.max(recentes[n], banco.mudanca[t * 26 + n]);
+  return {
+    boltzmann: bz ? acoplamentosFortes(bz.esp.maquina) : null,
+    regimes: Array.from({ length: 25 }, (_, i) => ({ numero: i + 1, idade: banco.idadeRegime[i + 1], picoMudanca200: recentes[i + 1] })),
+    evolucoes: res.estado.evolucoes,
+    especialistas: especialistasDetalhe(res.estado)
+  };
 }
 async function testeTemporal(sorteios, opcoes = {}) {
-  const { n = 30, semente = 7, onProgresso, aquecimento } = opcoes;
+  const { n = 10, semente = 7, onProgresso, aquecimento } = opcoes;
   const real = simular2(sorteios, { aquecimento, guardarRegistros: false });
   const r = rng(semente), nulos = [];
   for (let i = 0; i < n; i++) {
     nulos.push(simular2(embaralhar(sorteios, r), { aquecimento, guardarRegistros: false }).ganho);
-    if (onProgresso) {
-      onProgresso(i + 1, n);
-      await new Promise((res) => setTimeout(res, 0));
-    }
+    onProgresso?.(i + 1, n);
+    await new Promise((res) => setTimeout(res, 0));
   }
   return { ganhoReal: real.ganho, nulos, p: (nulos.filter((g) => g >= real.ganho).length + 1) / (n + 1) };
 }
 async function scannerAblacao(sorteios, opcoes = {}) {
   const { onProgresso, aquecimento = 200 } = opcoes;
+  const banco = construirBanco(sorteios);
   const resumo = (r) => ({ ganho: r.ganho, acertos: r.acertos.reduce((a, b) => a + b, 0) / r.n, recentes: r.acertos.slice(-500).reduce((a, b) => a + b, 0) / Math.min(500, r.n) });
-  const base = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false }));
+  const base = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false, banco }));
   const linhas = [];
   for (let i = 0; i < FAMILIAS_SINAL.length; i++) {
     const f = FAMILIAS_SINAL[i];
-    const sem = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false, familiasAtivas: new Set(FAMILIAS_SINAL.filter((x) => x !== f)) }));
+    const sem = resumo(simular2(sorteios, { aquecimento, guardarRegistros: false, banco, familiasAtivas: new Set(FAMILIAS_SINAL.filter((x) => x !== f)) }));
     linhas.push({ familia: f, ...sem, deltaGanho: base.ganho - sem.ganho, deltaAcertos: base.acertos - sem.acertos, deltaRecentes: base.recentes - sem.recentes });
-    if (onProgresso) {
-      onProgresso(i + 1, FAMILIAS_SINAL.length);
-      await new Promise((res) => setTimeout(res, 0));
-    }
+    onProgresso?.(i + 1, FAMILIAS_SINAL.length);
+    await new Promise((res) => setTimeout(res, 0));
   }
   return { base, linhas: linhas.sort((a, b) => b.deltaGanho - a.deltaGanho) };
 }
@@ -7017,62 +7441,128 @@ function retornoEsperado(jogo, { modelo, ultimo, preco }) {
   }
   return { valor, porReal: valor / preco, porFaixa, tabela: tabela2, ...pop };
 }
-function gerarJogos(opcoes) {
-  const {
-    quantidade = 5,
-    modelo,
-    ultimo,
-    probs = null,
-    confianca = 0,
-    fixos = [],
-    excluidos = [],
-    sobreposicaoMax = 10,
-    iteracoes = 3e4,
-    semente = Date.now() % 1e9
-  } = opcoes;
-  const r = rng(semente);
+function montarProblema({ modelo, ultimo, probs = null, confianca = 0, fixos = [], excluidos = [], sobreposicaoMax = 10, quantidade }) {
   const livres = Array.from({ length: 25 }, (_, i) => i + 1).filter((n) => !fixos.includes(n) && !excluidos.includes(n));
   if (fixos.length > 15 || fixos.length + livres.length < 15) throw new Error("Combinação de fixos/excluídos impossível");
-  const novoJogo = () => [...fixos, ...embaralhar(livres, r).slice(0, 15 - fixos.length)].sort((a, b) => a - b);
   const pesoMotor = probs ? Math.max(0, confianca - 0.5) * 2 : 0;
+  const cache = /* @__PURE__ */ new Map();
   const energiaJogo = (jogo) => {
+    const m = mascara(jogo);
+    if (cache.has(m)) return cache.get(m);
     const pop = avaliarPopularidade(modelo, jogo, ultimo);
     let e = Math.log(pop.indice) + 0.5 * pop.tracosFora;
     if (pesoMotor) for (const n of jogo) e -= pesoMotor * Math.log(probs[n] / 0.6) * 3;
+    if (cache.size > 2e5) cache.clear();
+    cache.set(m, e);
     return e;
   };
-  const penalSobreposicao = (a, b) => Math.max(0, popcount2(a & b) - sobreposicaoMax);
-  let jogos = Array.from({ length: quantidade }, novoJogo);
-  let mascaras = jogos.map(mascara);
-  let ej = jogos.map(energiaJogo);
-  const energiaTotal = () => {
-    let e = ej.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < quantidade; i++) for (let j = i + 1; j < quantidade; j++) e += 0.3 * penalSobreposicao(mascaras[i], mascaras[j]);
-    return e;
-  };
-  let E = energiaTotal();
-  let melhor = { jogos: jogos.map((j) => [...j]), E };
+  const sobre = (a, b) => 0.3 * Math.max(0, popcount2(a & b) - sobreposicaoMax);
+  return { livres, fixos, quantidade, energiaJogo, sobre };
+}
+function portfolioInicial(pb, r) {
+  return Array.from({ length: pb.quantidade }, () => [...pb.fixos, ...embaralhar(pb.livres, r).slice(0, 15 - pb.fixos.length)].sort((a, b) => a - b));
+}
+function energiaPortfolio(pb, jogos) {
+  const ms = jogos.map(mascara);
+  let e = jogos.reduce((a, j) => a + pb.energiaJogo(j), 0);
+  for (let i = 0; i < ms.length; i++) for (let j = i + 1; j < ms.length; j++) e += pb.sobre(ms[i], ms[j]);
+  return e;
+}
+function propor(pb, jogos, g, r) {
+  const trocaveis = jogos[g].filter((n) => !pb.fixos.includes(n));
+  const fora = pb.livres.filter((n) => !jogos[g].includes(n));
+  if (!trocaveis.length || !fora.length) return null;
+  const sai = trocaveis[Math.floor(r() * trocaveis.length)], entra = fora[Math.floor(r() * fora.length)];
+  return jogos[g].map((n) => n === sai ? entra : n).sort((a, b) => a - b);
+}
+function deltaClassico(pb, jogos, ms, g, novo) {
+  const mNovo = mascara(novo);
+  let d = pb.energiaJogo(novo) - pb.energiaJogo(jogos[g]);
+  for (let j = 0; j < jogos.length; j++) if (j !== g) d += pb.sobre(mNovo, ms[j]) - pb.sobre(ms[g], ms[j]);
+  return d;
+}
+function recozimentoClassico(pb, { iteracoes, r }) {
+  const jogos = portfolioInicial(pb, r), ms = jogos.map(mascara);
+  let E = energiaPortfolio(pb, jogos), melhor = { jogos: jogos.map((j) => [...j]), E };
   const T0 = 0.5, T1 = 2e-3;
   for (let it = 0; it < iteracoes; it++) {
     const T2 = T0 * (T1 / T0) ** (it / iteracoes);
-    const g = Math.floor(r() * quantidade);
-    const trocaveis = jogos[g].filter((n) => !fixos.includes(n));
-    const fora = livres.filter((n) => !jogos[g].includes(n));
-    if (!trocaveis.length || !fora.length) continue;
-    const sai = trocaveis[Math.floor(r() * trocaveis.length)], entra = fora[Math.floor(r() * fora.length)];
-    const novo = jogos[g].map((n) => n === sai ? entra : n).sort((a, b) => a - b);
-    const mNovo = mascara(novo), eNovo = energiaJogo(novo);
-    let delta = eNovo - ej[g];
-    for (let j = 0; j < quantidade; j++) if (j !== g) delta += 0.3 * (penalSobreposicao(mNovo, mascaras[j]) - penalSobreposicao(mascaras[g], mascaras[j]));
-    if (delta <= 0 || r() < Math.exp(-delta / T2)) {
+    const g = Math.floor(r() * pb.quantidade), novo = propor(pb, jogos, g, r);
+    if (!novo) continue;
+    const d = deltaClassico(pb, jogos, ms, g, novo);
+    if (d <= 0 || r() < Math.exp(-d / T2)) {
       jogos[g] = novo;
-      mascaras[g] = mNovo;
-      ej[g] = eNovo;
-      E += delta;
+      ms[g] = mascara(novo);
+      E += d;
       if (E < melhor.E - 1e-12) melhor = { jogos: jogos.map((j) => [...j]), E };
     }
   }
-  return melhor.jogos;
+  return melhor;
+}
+function annealingQuantico(pb, { iteracoes, r, replicas = 8, T: T2 = 1e-3, gama0 = 1, gama1 = 2e-3 }) {
+  const P2 = replicas;
+  const reps = Array.from({ length: P2 }, () => portfolioInicial(pb, r));
+  const ms = reps.map((j) => j.map(mascara));
+  const Ec = reps.map((j) => energiaPortfolio(pb, j));
+  let melhor = { jogos: reps[0].map((j) => [...j]), E: Ec[0] };
+  Ec.forEach((e, p) => {
+    if (e < melhor.E) melhor = { jogos: reps[p].map((j) => [...j]), E: e };
+  });
+  const concordancia = (a, b) => 4 * popcount2(a & b) - 35;
+  const passos = Math.max(1, iteracoes);
+  for (let it = 0; it < passos; it++) {
+    const gama = gama0 * (gama1 / gama0) ** (it / passos);
+    const Jp = -(P2 * T2 / 2) * Math.log(Math.tanh(gama / (P2 * T2)));
+    for (let p = 0; p < P2; p++) {
+      const g = Math.floor(r() * pb.quantidade), novo = propor(pb, reps[p], g, r);
+      if (!novo) continue;
+      const mNovo = mascara(novo);
+      const dC = deltaClassico(pb, reps[p], ms[p], g, novo);
+      const ant = (p - 1 + P2) % P2, prox = (p + 1) % P2;
+      const dQ = -Jp * (concordancia(mNovo, ms[ant][g]) + concordancia(mNovo, ms[prox][g]) - concordancia(ms[p][g], ms[ant][g]) - concordancia(ms[p][g], ms[prox][g]));
+      const d = dC / P2 + dQ;
+      if (d <= 0 || r() < Math.exp(-d / T2)) {
+        reps[p][g] = novo;
+        ms[p][g] = mNovo;
+        Ec[p] += dC;
+        if (Ec[p] < melhor.E - 1e-12) melhor = { jogos: reps[p].map((j) => [...j]), E: Ec[p] };
+      }
+    }
+  }
+  return polir(pb, melhor);
+}
+function polir(pb, { jogos, E }) {
+  jogos = jogos.map((j) => [...j]);
+  const ms = jogos.map(mascara);
+  for (let volta = 0; volta < 50; volta++) {
+    let melhorD = -1e-12, melhorMov = null;
+    for (let g = 0; g < jogos.length; g++) for (const sai of jogos[g]) {
+      if (pb.fixos.includes(sai)) continue;
+      for (const entra of pb.livres) {
+        if (jogos[g].includes(entra)) continue;
+        const novo = jogos[g].map((n) => n === sai ? entra : n).sort((a, b) => a - b);
+        const d = deltaClassico(pb, jogos, ms, g, novo);
+        if (d < melhorD) {
+          melhorD = d;
+          melhorMov = { g, novo };
+        }
+      }
+    }
+    if (!melhorMov) break;
+    jogos[melhorMov.g] = melhorMov.novo;
+    ms[melhorMov.g] = mascara(melhorMov.novo);
+    E += melhorD;
+  }
+  return { jogos, E };
+}
+function gerarPortfolio(opcoes) {
+  const { quantidade = 5, iteracoes = 3e4, semente = Date.now() % 1e9, metodo = "ambos" } = opcoes;
+  const pb = montarProblema({ ...opcoes, quantidade });
+  const resultados = {};
+  if (metodo !== "classico") resultados.quantico = annealingQuantico(pb, { iteracoes: Math.round(iteracoes / 4), r: rng(semente), ...opcoes.sqa || {} });
+  if (metodo !== "quantico") resultados.classico = polir(pb, recozimentoClassico(pb, { iteracoes, r: rng(semente + 1) }));
+  const [vencedor, res] = Object.entries(resultados).sort((a, b) => a[1].E - b[1].E)[0];
+  return { jogos: res.jogos, energia: res.E, metodo: vencedor, energias: Object.fromEntries(Object.entries(resultados).map(([k, v]) => [k, v.E])) };
 }
 function simularConjunto(jogos, { sorteios = 5e4, semente = 3 } = {}) {
   const r = rng(semente), ms = jogos.map(mascara);
@@ -7248,6 +7738,53 @@ function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
       </div>
     </div>;
 }
+function PainelOmega({ ins }) {
+  const bz = ins.boltzmann;
+  const maxIdade = Math.max(1, ...ins.regimes.map((r) => r.idade));
+  return <>
+      <Card titulo="Especialistas ativos">
+        <Tabela colunas={[
+    { id: "nome", titulo: "Especialista", render: (l) => <div><div>{l.familia === "evolucao" ? "🧬 " : ""}{l.nome}</div>{l.familia === "evolucao" && <div style={{ fontSize: 11, color: T.textMuted }}>criado no concurso {l.criadoEm}</div>}</div> },
+    { id: "peso", titulo: "Peso", alinhar: "right", mono: true, render: (l) => pct(l.peso, 1) },
+    { id: "vant", titulo: "Vantagem recente", alinhar: "right", mono: true, render: (l) => l.familia === "nulo" ? "—" : `${l.vantagemRecente >= 0 ? "+" : ""}${dec(l.vantagemRecente, 2)} nats` },
+    { id: "st", titulo: "", render: (l) => l.quarentena ? <Chip tom="ruim">quarentena</Chip> : l.familia === "nulo" ? <Chip>referência</Chip> : l.vantagemRecente > 0 ? <Chip tom="bom">à frente</Chip> : <Chip>atrás</Chip> }
+  ]} linhas={ins.especialistas.map((e, i) => ({ ...e, __id: i }))} />
+      </Card>
+      <Card titulo="Evolução genética">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>A cada 300 concursos, uma população de modelos é avaliada nos 450 concursos anteriores, cruza, sofre mutação e só é promovida se também vencer o acaso nos 150 seguintes (validação nunca usada na seleção). No máximo 4 evoluídos vivos; os piores ou em quarentena saem.</div>
+        <Tabela vazio="O primeiro ciclo acontece a partir do concurso 600 do replay." colunas={[
+    { id: "concurso", titulo: "Ciclo", mono: true },
+    { id: "avaliados", titulo: "Genomas", alinhar: "right", mono: true },
+    { id: "melhor", titulo: "Melhor no treino", render: (l) => <div><div style={{ fontFamily: T.mono, fontSize: 11.5 }}>{l.melhor.nome}</div><div style={{ fontSize: 11, color: T.textMuted }}>treino {dec(l.melhor.treino * 1e3, 2)} · validação {dec(l.melhor.validacao * 1e3, 2)} milinats</div></div> },
+    { id: "prom", titulo: "Promovidos", render: (l) => l.promovidos.length ? l.promovidos.map((p) => <div key={p.nome} style={{ fontFamily: T.mono, fontSize: 11, color: T.bom }}>+ {p.nome}</div>) : <span style={{ color: T.textMuted }}>nenhum passou</span> },
+    { id: "rem", titulo: "Removidos", render: (l) => l.removidos.length ? l.removidos.map((p) => <div key={p} style={{ fontFamily: T.mono, fontSize: 11, color: T.ruim }}>− {p}</div>) : "—" }
+  ]} linhas={ins.evolucoes.slice().reverse().map((e, i) => ({ ...e, __id: i }))} />
+      </Card>
+      <Card titulo="Máquina de Boltzmann (modelo de Ising)">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>Cada acoplamento só "acende" quando passa num teste de evidência online (|z| &gt; 3√n). Acoplamento positivo = as dezenas tendem a sair juntas; temporal = uma dezena no sorteio anterior muda a chance de outra no atual.</div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <Metrica rotulo="Acoplamentos entre dezenas" valor={bz ? bz.nJ : "—"} detalhe="de 300 possíveis" />
+          <Metrica rotulo="Acoplamentos temporais" valor={bz ? bz.nK : "—"} detalhe="de 625 possíveis" />
+        </div>
+        {bz && (bz.nJ + bz.nK === 0 ? <Aviso tom="info">Nenhuma interação passou no teste: no histórico, nenhuma dupla de dezenas sai junta (ou se evita), e nenhuma dezena influencia o sorteio seguinte, além do acaso.</Aviso> : <Tabela colunas={[
+    { id: "tipo", titulo: "Tipo" },
+    { id: "desc", titulo: "Dezenas", mono: true },
+    { id: "valor", titulo: "Força", alinhar: "right", mono: true, render: (l) => `${l.valor >= 0 ? "+" : ""}${dec(l.valor, 3)}` }
+  ]} linhas={[...bz.J.map((j, i) => ({ __id: `j${i}`, tipo: "mesmo sorteio", desc: `${formatarNum(j.a)} ↔ ${formatarNum(j.b)}`, valor: j.valor })), ...bz.K.map((k, i) => ({ __id: `k${i}`, tipo: "sorteio anterior → atual", desc: `${formatarNum(k.de)} → ${formatarNum(k.para)}`, valor: k.valor }))]} />)}
+      </Card>
+      <Card titulo="Regimes por dezena (BOCPD)">
+        <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>Idade estimada do comportamento atual de cada dezena (em concursos, até 300). Barra curta = o detector acredita que a dezena mudou de comportamento recentemente.</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, alignItems: "end", height: 90 }}>
+          {ins.regimes.map((r) => <div key={r.numero} title={`nº ${formatarNum(r.numero)}: regime com ~${Math.round(r.idade)} concursos`} style={{ height: `${r.idade / maxIdade * 100}%`, background: r.idade < 0.7 * maxIdade ? T.serie2 : T.serie1, borderRadius: "3px 3px 0 0" }} />)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(25, 1fr)", gap: 2, marginTop: 3 }}>{ins.regimes.map((r) => <div key={r.numero} style={{ textAlign: "center", fontFamily: T.mono, fontSize: 9.5, color: T.textMuted }}>{formatarNum(r.numero)}</div>)}</div>
+        <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11.5, color: T.textSoft, flexWrap: "wrap" }}>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie2, borderRadius: 2, marginRight: 5 }} />regime jovem (mudou há pouco)</span>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.serie1, borderRadius: 2, marginRight: 5 }} />regime estável</span>
+        </div>
+      </Card>
+    </>;
+}
 function Previsao({ sorteios, concursos, proximo, acoes }) {
   const [ativas, setAtivas] = useState9(() => new Set(FAMILIAS_SINAL));
   const [base, setBase] = useState9(null);
@@ -7258,17 +7795,32 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   const [prog, setProg] = useState9(null);
   const [dezena, setDezena] = useState9(null);
   const [registrado, setRegistrado] = useState9(false);
+  const [carga, setCarga] = useState9(null);
   useEffect2(() => {
+    let vivo = true;
     setBase(null);
     setConfig(null);
-    const t = setTimeout(() => setBase(simular2(sorteios, { concursos })), 50);
-    return () => clearTimeout(t);
+    setCarga([0, sorteios.length]);
+    simularAsync(sorteios, { concursos, onProgresso: (a, b) => vivo && setCarga([a, b]) }).then((r) => {
+      if (vivo) {
+        setBase(r);
+        setCarga(null);
+      }
+    });
+    return () => {
+      vivo = false;
+    };
   }, [sorteios]);
+  const inspecao = useMemo6(() => config || base ? inspecionar(config || base) : null, [config, base]);
   const atual = config || base;
   const rel = useMemo6(() => atual ? relatorio(atual.registros) : null, [atual]);
   const redundancia = useMemo6(() => atual ? redundanciaFamilias(atual) : null, [atual]);
   const mudancas = useMemo6(() => atual ? resumoMudancas(atual) : null, [atual]);
-  if (!atual) return <Card><div style={{ color: T.textSoft }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos (cada um previsto só com o passado)…</div></Card>;
+  if (!atual) return <Card titulo="Treinando o Motor Ω">
+      <div style={{ color: T.textSoft, fontSize: 13, marginBottom: 10 }}>Replay test-then-learn em {sorteios.length.toLocaleString("pt-BR")} concursos: banco de características, BOCPD, máquina de Boltzmann, rede neural e ciclos de evolução genética, cada concurso previsto só com o passado.</div>
+      {carga && <div style={{ height: 8, background: T.surface2, borderRadius: 4 }}><div style={{ width: `${carga[0] / carga[1] * 100}%`, height: "100%", background: T.gold, borderRadius: 4, transition: "width .2s" }} /></div>}
+      {carga && <div style={{ fontSize: 12, color: T.textMuted, marginTop: 6, fontFamily: T.mono }}>{carga[0].toLocaleString("pt-BR")} / {carga[1].toLocaleString("pt-BR")}</div>}
+    </Card>;
   const prox = prever2(atual.estado);
   const gov = governanca(atual.estado);
   const cf = dezena ? contrafactual(atual.estado) : null;
@@ -7277,12 +7829,14 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
     const xs = atual.acertos.slice(i, i + 500), m = media(xs);
     blocos.push({ __id: i, de: concursos[200 + i], ate: concursos[Math.min(200 + i + 499, concursos.length - 1)], media: m, z: (m - 9) / (0.949 / Math.sqrt(xs.length)) });
   }
-  const aplicar = () => {
+  const aplicar = async () => {
+    if (ativas.size === FAMILIAS_SINAL.length) {
+      setConfig(null);
+      return;
+    }
     setCalculando(true);
-    setTimeout(() => {
-      setConfig(ativas.size === FAMILIAS_SINAL.length ? null : simular2(sorteios, { concursos, familiasAtivas: ativas }));
-      setCalculando(false);
-    }, 30);
+    setConfig(await simularAsync(sorteios, { concursos, familiasAtivas: ativas }));
+    setCalculando(false);
   };
   const rodarPerm = async (n) => {
     setPerm(null);
@@ -7300,11 +7854,13 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   };
   const proxBase = config ? prever2(base.estado) : null;
   return <>
-      <Card titulo="Motor preditivo" acao={config ? <Chip tom="alerta">configuração de teste ativa</Chip> : null}>
+      <Card titulo="Motor Ω" acao={config ? <Chip tom="alerta">configuração de teste ativa</Chip> : null}>
         <div style={{ fontSize: 13, color: T.textSoft, lineHeight: 1.55, marginBottom: 12 }}>
-          {FAMILIAS_SINAL.length} famílias de sinais (frequência, tendência, memória, Markov, pares, similaridade KNN, estrutura do volante e todas juntas) competem numa
-          mistura bayesiana contra o <b style={{ color: T.goldText }}>modelo nulo</b>. Replay <i>test-then-learn</i>: cada concurso é previsto só com o passado e depois entra
-          no aprendizado. O desempenho antigo é esquecido aos poucos (meia-vida ≈ 350 concursos).
+          Banco de 26 características em z-score, <b style={{ color: T.goldText }}>detecção bayesiana de mudança de regime</b> (BOCPD) por dezena,
+          <b style={{ color: T.goldText }}> máquina de Boltzmann dinâmica</b> (modelo de Ising: interações entre dezenas e de um sorteio para o seguinte),
+          <b style={{ color: T.goldText }}> rede neural online</b> e <b style={{ color: T.goldText }}>especialistas criados por evolução genética</b>, promovidos só se
+          passarem na validação fora da amostra. Tudo combinado por meta-aprendizado <i>Fixed-Share</i> contra o modelo nulo, com quarentena automática de quem
+          fica pior que o acaso. Cada concurso é previsto só com o passado.
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Metrica rotulo="Confiança em padrões hoje" valor={pct(prox.confianca)} detalhe="50% = não sei; perto de 100% = padrão forte" tom={prox.confianca > 0.9 ? "bom" : void 0} />
@@ -7349,6 +7905,8 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
   ]} linhas={gov.map((g) => ({ ...g, __id: g.familia }))} />
         <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: mais de 2 nats pior que o acaso, fora da mistura, aprendendo em sombra até melhorar ("evolui ou sai").</div>
       </Card>
+
+      {inspecao && <PainelOmega ins={inspecao} />}
 
       <Card titulo="Comparação com baselines permanentes">
         <Tabela colunas={[
@@ -7529,7 +8087,7 @@ function Popularidade({ modelo, ultimo }) {
     </>;
 }
 function Gerador({ modelo, ultimo, previsaoMotor }) {
-  const [cfg, setCfg] = useState9({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "" });
+  const [cfg, setCfg] = useState9({ quantidade: "5", fixos: "", excluidos: "", sobreposicao: "10", preco: "3,50", usarMotor: false, semente: "", metodo: "ambos" });
   const [res, setRes] = useState9(null);
   const [rodando, setRodando] = useState9(false);
   const preco = Number(cfg.preco.replace(",", ".")) || 3.5;
@@ -7538,8 +8096,9 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
     setTimeout(() => {
       try {
         const semente = Number(cfg.semente) || Math.floor(Math.random() * 1e9);
-        const jogos = gerarJogos({
+        const port = gerarPortfolio({
           semente,
+          metodo: cfg.metodo,
           quantidade: Math.min(50, Math.max(1, Number(cfg.quantidade) || 5)),
           modelo,
           ultimo,
@@ -7549,8 +8108,9 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           probs: cfg.usarMotor ? previsaoMotor?.probs : null,
           confianca: cfg.usarMotor ? previsaoMotor?.confianca : 0
         });
+        const jogos = port.jogos;
         const avaliados = jogos.map((j) => ({ jogo: j, ...retornoEsperado(j, { modelo, ultimo, preco }) }));
-        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente });
+        setRes({ avaliados, conjunto: simularConjunto(jogos), erro: null, semente, metodo: port.metodo, energias: port.energias });
       } catch (e) {
         setRes({ erro: e.message });
       }
@@ -7559,10 +8119,11 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
   };
   const referencia = useMemo6(() => retornoEsperado([3, 6, 7, 9, 12, 13, 14, 16, 17, 18, 19, 21, 22, 24, 25], { modelo, ultimo, preco }), [modelo, ultimo, preco]);
   return <>
-      <Card titulo="Gerador por recozimento simulado">
+      <Card titulo="Gerador · annealing quântico">
         <div style={{ fontSize: 13, color: T.textSoft, lineHeight: 1.55, marginBottom: 12 }}>
           Busca, entre milhões de combinações, jogos com <b style={{ color: T.goldText }}>baixa popularidade</b> (prêmio dividido com menos gente) e pouco sobrepostos entre si.
-          O método é o recozimento simulado, a versão clássica do annealing quântico: aceita pioras no começo para escapar de mínimos locais e vai "esfriando" até convergir.
+          O otimizador principal é o <b style={{ color: T.goldText }}>annealing quântico simulado</b> (Monte Carlo de integral de caminho): 8 réplicas do portfólio acopladas por um
+          campo transversal que diminui aos poucos, o que permite "tunelar" entre soluções. Ele concorre com o recozimento clássico e fica o de menor energia.
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
           <div><Rotulo>Quantidade de jogos</Rotulo><input style={estiloInput} value={cfg.quantidade} onChange={(e) => setCfg({ ...cfg, quantidade: e.target.value.replace(/\D/g, "") })} /></div>
@@ -7570,6 +8131,13 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
           <div><Rotulo>Excluídos</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.excluidos} placeholder="ex.: 1 25" onChange={(e) => setCfg({ ...cfg, excluidos: e.target.value })} /></div>
           <div><Rotulo>Máx. dezenas em comum</Rotulo><input style={estiloInput} value={cfg.sobreposicao} onChange={(e) => setCfg({ ...cfg, sobreposicao: e.target.value.replace(/\D/g, "") })} /></div>
           <div><Rotulo>Preço da aposta (R$)</Rotulo><input style={estiloInput} value={cfg.preco} onChange={(e) => setCfg({ ...cfg, preco: e.target.value })} /></div>
+          <div><Rotulo>Otimizador</Rotulo>
+            <select style={estiloInput} value={cfg.metodo} onChange={(e) => setCfg({ ...cfg, metodo: e.target.value })}>
+              <option value="ambos">Quântico + clássico (melhor dos dois)</option>
+              <option value="quantico">Annealing quântico simulado</option>
+              <option value="classico">Recozimento clássico</option>
+            </select>
+          </div>
           <div><Rotulo>Seed (vazio = nova)</Rotulo><input style={{ ...estiloInput, fontFamily: T.mono }} value={cfg.semente} placeholder="aleatória" onChange={(e) => setCfg({ ...cfg, semente: e.target.value.replace(/\D/g, "") })} /></div>
         </div>
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginTop: 12, cursor: "pointer" }}>
@@ -7606,7 +8174,7 @@ function Gerador({ modelo, ultimo, previsaoMotor }) {
   })])}
                 </div>
               </div>}
-            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
+            <div style={{ fontSize: 12, color: T.textMuted, marginTop: 8 }}>Otimizador vencedor: <b style={{ color: T.goldText }}>{res.metodo === "quantico" ? "annealing quântico simulado" : "recozimento clássico"}</b>{Object.keys(res.energias).length > 1 ? ` (energia quântico ${dec(res.energias.quantico, 3)} · clássico ${dec(res.energias.classico, 3)}; menor é melhor)` : ""}. Seed desta geração: <span style={{ fontFamily: T.mono, color: T.goldText }}>{res.semente}</span> · repita com a mesma seed para obter os mesmos jogos.</div>
           </Card>
           <Card titulo="Jogos">
             {res.avaliados.map((a, i) => <div key={i} style={{ padding: "10px 0", borderTop: i ? `1px solid ${T.borderSoft}` : "none" }}>
@@ -7685,7 +8253,7 @@ function AbaQuantico({ app, acoes }) {
   const proximo = estimarProximo(app.resultados);
   const [previsaoMotor, setPrevisaoMotor] = useState9(null);
   useEffect2(() => {
-    if (secao === "gerador" && !previsaoMotor) setTimeout(() => setPrevisaoMotor(prever2(simular2(sorteios).estado)), 50);
+    if (secao === "gerador" && !previsaoMotor) simularAsync(sorteios).then((r) => setPrevisaoMotor(prever2(r.estado)));
   }, [secao]);
   return <>
       <Card>

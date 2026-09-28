@@ -69,13 +69,15 @@ export function qValoresBH(pValores) {
 // Ajusta um deslocamento c para que a soma das probabilidades seja 15
 // (o sorteio sempre tem exatamente 15 números).
 export function calibrarSoma15(logits) {
-  let lo = -20, hi = 20;
-  for (let it = 0; it < 60; it++) {
-    const c = (lo + hi) / 2;
-    const s = logits.reduce((acc, x) => acc + sigmoid(x + c), 0);
-    if (s > 15) hi = c; else lo = c;
+  // Newton no deslocamento c: f(c) = Σ σ(x + c) − 15, f'(c) = Σ σ(1 − σ).
+  let c = 0;
+  for (let it = 0; it < 30; it++) {
+    let s = 0, d = 0;
+    for (const x of logits) { const q = sigmoid(x + c); s += q; d += q * (1 - q); }
+    const passo = (s - 15) / Math.max(d, 1e-9);
+    c -= Math.max(-5, Math.min(5, passo));
+    if (Math.abs(passo) < 1e-10) break;
   }
-  const c = (lo + hi) / 2;
   return logits.map(x => sigmoid(x + c));
 }
 

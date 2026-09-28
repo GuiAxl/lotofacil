@@ -72,7 +72,7 @@ test("próximo concurso: segue os dias da semana com sorteio recente", async () 
   assert.equal(estimarProximo([...sabado.slice(1), { concurso: 99, data: "26/09/2026" }]).data, "28/09/2026");
 });
 
-test("quântico v2: governança, explicação e contrafactual coerentes", () => {
+test("motor Ω: governança, explicação e contrafactual coerentes", () => {
   const r = rng(4);
   const base = Array.from({ length: 900 }, () => sorteio(r).sort((a, b) => a - b));
   const plantado = base.map((d, i) => (i > 0 && base[i - 1].includes(2) && !d.includes(1) ? [...d.slice(1), 1].sort((a, b) => a - b) : d));
@@ -82,17 +82,19 @@ test("quântico v2: governança, explicação e contrafactual coerentes", () => 
   const p = prever(res.estado);
   const soma = explicarDezena(p, 1).reduce((s, l) => s + l.contribuicao, 0);
   assert.ok(Math.abs(soma - (p.probs[1] - 0.6)) < 1e-9);
-  assert.equal(contrafactual(res.estado).length, 9);
+  const cf = contrafactual(res.estado);
+  assert.ok(cf.length >= 12 && cf.every(c => c.deltas.length === 26));
 });
 
-test("evolui ou sai: modelo muito pior que o acaso sai da mistura e volta quando melhora", async () => {
-  const { criarEstado, pesosMistura, governanca } = await import("../src/quantico/motor.js");
-  const e = criarEstado();
-  const i = e.modelos.findIndex(m => m.familia === "pares");
-  e.modelos.forEach(m => { m.perda = 100; });
-  e.modelos[i].perda = 103; e.modelos[i + 1].perda = 103; // 3 nats pior que o nulo
+test("evolui ou sai: especialista muito pior que o acaso sai da mistura e volta quando melhora", async () => {
+  const { simular: sim, pesosMistura, governanca: gov } = await import("../src/quantico/motor.js");
+  const r = rng(6);
+  const e = sim(Array.from({ length: 300 }, () => sorteio(r).sort((a, b) => a - b)), { aquecimento: 100, guardarRegistros: false }).estado;
+  const i = e.especialistas.findIndex(x => x.familia === "pares");
+  const nulo = e.especialistas.find(x => x.nulo);
+  e.especialistas[i].perda = nulo.perda + 3;
   assert.equal(pesosMistura(e)[i], 0);
-  assert.equal(governanca(e).find(g => g.familia === "pares").status, "Quarantine");
-  e.modelos[i].perda = 100.5;
+  assert.equal(gov(e).find(g => g.familia === "pares").status, "Quarantine");
+  e.especialistas[i].perda = nulo.perda + 0.5;
   assert.ok(pesosMistura(e)[i] > 0);
 });

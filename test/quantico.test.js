@@ -68,3 +68,30 @@ test("fechamento 18 dezenas / 14 pontos: garantia verificada em todos os 816 cen
   assert.ok(f.verificado);
   assert.ok(f.jogos.length <= 26, `${f.jogos.length} jogos`);
 });
+
+test("Boltzmann: não inventa interação no acaso e acha interação plantada", async () => {
+  const { criarBoltzmann, aprenderBoltzmann, acoplamentosFortes } = await import("../src/quantico/boltzmann.js");
+  const acaso = aleatorios(1200, 21);
+  const b1 = criarBoltzmann();
+  acaso.forEach((d, t) => aprenderBoltzmann(b1, d, acaso[t - 1] || null));
+  const a1 = acoplamentosFortes(b1);
+  assert.ok(a1.nJ + a1.nK <= 2, `${a1.nJ} + ${a1.nK}`);
+  const plant = acaso.map((d, t) => (t > 0 && acaso[t - 1].includes(4) && !d.includes(3) ? [...d.filter(x => x !== d.find(v => v > 5)), 3].sort((a, b) => a - b) : d));
+  const b2 = criarBoltzmann();
+  plant.forEach((d, t) => aprenderBoltzmann(b2, d, plant[t - 1] || null));
+  const k = acoplamentosFortes(b2).K[0];
+  assert.deepEqual([k.de, k.para], [4, 3]);
+  assert.ok(k.valor > 0.5);
+});
+
+test("annealing quântico simulado: portfólio válido e não pior que o clássico na média", async () => {
+  const { gerarPortfolio } = await import("../src/quantico/otimizador.js");
+  const modelo = ajustarPopularidade(HISTORICO), ultimo = HISTORICO.at(-1).dezenas;
+  let q = 0, c = 0;
+  for (let s = 1; s <= 3; s++) {
+    const r = gerarPortfolio({ quantidade: 6, modelo, ultimo, semente: s, metodo: "ambos", iteracoes: 15000 });
+    r.jogos.forEach(j => assert.equal(new Set(j).size, 15));
+    q += r.energias.quantico; c += r.energias.classico;
+  }
+  assert.ok(q <= c + 0.05, `quântico ${q} × clássico ${c}`);
+});
