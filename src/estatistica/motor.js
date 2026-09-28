@@ -296,3 +296,17 @@ export function treinarAte(concursos, limite) {
 export function preverTodos(estado, concurso) {
   return Object.fromEntries(Object.keys(MOTORES).map(m => [m, prever(estado, concurso, m)]));
 }
+
+// Jogo do motor astral para cada concurso que tem mapa completo, treinado só
+// com os concursos anteriores. Devolve Map(concurso → { jogo, valores, acertos, treino }).
+export function jogosAstrais(concursos) {
+  const estado = criarEstado(), saida = new Map();
+  for (const c of [...concursos].sort((a, b) => a.concurso - b.concurso)) {
+    if (c.chaves) {
+      const p = prever(estado, c, "astral");
+      saida.set(c.concurso, { jogo: p.jogo, valores: p.valores, acertos: c.resultado ? acertos(p.jogo, c.resultado) : null, treino: estado.nMapas });
+    }
+    registrar(estado, c);
+  }
+  return saida;
+}

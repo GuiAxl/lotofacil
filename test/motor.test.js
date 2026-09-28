@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { simular, testePermutacao, criarEstado, registrar, prever } from "../src/estatistica/motor.js";
-import { descobrirSinais } from "../src/estatistica/descoberta.js";
 import { media, hipergeometrica, qValoresBH, pBinomialBicaudal } from "../src/estatistica/matematica.js";
 import { historicoSintetico } from "./sintetico.js";
 
@@ -37,8 +36,6 @@ test("acaso puro: mistura não confia nos sinais e permutação não acusa nada"
     assert.ok(r.trilha.at(-1).pesoAstral < 0.5, `peso astral ${r.trilha.at(-1).pesoAstral}`);
     const perm = await testePermutacao(h, { n: 40 });
     assert.ok(perm.p.ganhoPerda > 0.05, `p ${perm.p.ganhoPerda}`);
-    const d = descobrirSinais(h);
-    assert.equal(d.sobrevivemFDR, 0);
   }
 });
 
@@ -49,8 +46,4 @@ test("sinal plantado: mistura passa a confiar nos sinais e a permutação confir
   assert.ok(r.perda.uniforme > r.perda.astral);
   const perm = await testePermutacao(h, { n: 40 });
   assert.ok(perm.p.ganhoPerda < 0.05, `p ${perm.p.ganhoPerda}`);
-  const d = descobrirSinais(h);
-  const topo = d.linhas.slice(0, 5).map(l => `${l.chave}:${l.numero}`);
-  assert.ok(topo.includes("plantado:1"), topo.join(","));
-  assert.ok(d.linhas.find(l => l.chave === "plantado" && l.numero === 1).probReal > 0.9);
 });

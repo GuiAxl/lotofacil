@@ -1,139 +1,97 @@
 import { useState, useMemo } from "react";
-import { T, Card, Botao, Chip, Rotulo, Bolinhas, Tabela, Aviso, Metrica, estiloInput } from "./base.jsx";
-import { interpretarMapa, parseNumeros, validarResultado } from "./estado.js";
+import { T, Card, Botao, Chip, Rotulo, Bolinhas, Metrica, Tabela, Aviso, estiloInput } from "./base.jsx";
+import { interpretarMapa, dec } from "./estado.js";
 import { dividirMapasEmLote } from "../astro/parser.js";
 
-export default function AbaHistorico({ app, acoes, abrirConcurso }) {
-  const [novo, setNovo] = useState({ concurso: "", data: "", numeros: "" });
+const corAcertos = a => (a == null ? T.textMuted : a >= 11 ? T.bom : a >= 9 ? T.goldText : T.textSoft);
+
+function CartaoConcurso({ item, abrir, remover }) {
+  const [aberto, setAberto] = useState(false);
+  const [confirmar, setConfirmar] = useState(false);
+  const { concurso, data, hora, resultado, jogo, acertos, completo } = item;
+  return (
+    <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8 }}>
+      <div onClick={() => setAberto(!aberto)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, cursor: "pointer", flexWrap: "wrap" }}>
+        <div>
+          <span style={{ fontFamily: T.serif, fontSize: 18, color: T.text }}>Concurso {concurso}</span>
+          <span style={{ color: T.textMuted, fontSize: 12, marginLeft: 8 }}>{data || "sem data"}{hora ? ` · ${hora}` : ""}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {!completo && <Chip tom="ruim">mapa incompleto</Chip>}
+          {completo && acertos == null && <Chip tom="ouro">aguardando sorteio</Chip>}
+          {acertos != null && <span style={{ fontFamily: T.mono, fontSize: 16, fontWeight: 700, color: corAcertos(acertos) }}>{acertos} <span style={{ fontSize: 11.5, fontWeight: 400, color: T.textMuted, fontFamily: T.sans }}>acertos</span></span>}
+          <span style={{ color: T.textMuted }}>{aberto ? "▴" : "▾"}</span>
+        </div>
+      </div>
+      {aberto && (
+        <div style={{ marginTop: 12 }}>
+          {jogo && <><Rotulo>Jogo do motor</Rotulo><Bolinhas numeros={jogo} destaque={resultado} tamanho={26} /></>}
+          {resultado && <div style={{ marginTop: 10 }}><Rotulo>Sorteio</Rotulo><Bolinhas numeros={resultado} tamanho={26} /></div>}
+          <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+            <Botao pequeno variante="discreto" onClick={() => abrir(concurso)}>Abrir mapa</Botao>
+            {!confirmar
+              ? <Botao pequeno variante="perigo" onClick={() => setConfirmar(true)}>Remover mapa</Botao>
+              : <><Botao pequeno variante="perigo" onClick={() => remover(concurso)}>Confirmar remoção</Botao><Botao pequeno variante="discreto" onClick={() => setConfirmar(false)}>Cancelar</Botao></>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function AbaHistorico({ app, acoes, astral, abrir }) {
   const [lote, setLote] = useState("");
-  const [relatorioLote, setRelatorioLote] = useState(null);
-  const [filtro, setFiltro] = useState("todos");
-  const [limite, setLimite] = useState(40);
+  const [relatorio, setRelatorio] = useState(null);
 
-  const numerosNovo = parseNumeros(novo.numeros);
-  const jaExisteOficial = app.resultados.some(r => r.concurso === Number(novo.concurso));
-  const podeSalvar = Number(novo.concurso) > 0 && !jaExisteOficial && validarResultado(numerosNovo) && /^\d{2}\/\d{2}\/\d{4}$/.test(novo.data);
-  const [corrigindo, setCorrigindo] = useState(null); // { concurso, numeros, motivo }
-  const numerosCorrecao = corrigindo ? parseNumeros(corrigindo.numeros) : [];
-  const correcoes = Object.entries(app.correcoes || {});
-
-  const linhas = useMemo(() => {
+  const itens = useMemo(() => {
     const porConcurso = new Map(app.resultados.map(r => [r.concurso, r]));
-    const todos = new Set([...porConcurso.keys(), ...Object.keys(app.mapas).map(Number)]);
-    return [...todos].sort((a, b) => b - a).map(c => {
-      const r = porConcurso.get(c);
-      const m = app.mapas[c];
-      return { __id: c, concurso: c, data: r?.data || m?.data || "", resultado: r?.resultado, corrigido: r?.corrigido, mapa: m, get leitura() { return m ? interpretarMapa(m.texto) : null; } };
-    });
-  }, [app.resultados, app.mapas]);
+    return Object.entries(app.mapas).map(([k, m]) => {
+      const c = Number(k), r = porConcurso.get(c), a = astral.get(c);
+      return { concurso: c, data: m.data || r?.data || "", hora: m.hora || "", resultado: r?.resultado || null, jogo: a?.jogo || null, acertos: a?.acertos ?? null, completo: interpretarMapa(m.texto).mapa.completo };
+    }).sort((a, b) => b.concurso - a.concurso);
+  }, [app.mapas, app.resultados, astral]);
 
-  const filtradas = linhas.filter(l => filtro === "todos" || (filtro === "comMapa" && l.mapa) || (filtro === "semMapa" && !l.mapa) || (filtro === "comErro" && l.leitura && !l.leitura.mapa.completo));
-  const nMapas = linhas.filter(l => l.mapa).length, nOk = linhas.filter(l => l.leitura?.mapa.completo).length;
+  const comAcerto = itens.filter(i => i.acertos != null);
+  const media = comAcerto.length ? comAcerto.reduce((s, i) => s + i.acertos, 0) / comAcerto.length : null;
+  const melhor = comAcerto.length ? Math.max(...comAcerto.map(i => i.acertos)) : null;
+  const onzeMais = comAcerto.filter(i => i.acertos >= 11).length;
 
-  const analisarLote = () => {
-    const blocos = dividirMapasEmLote(lote);
-    setRelatorioLote(blocos.map(b => {
-      const { mapa, sinais } = interpretarMapa(b.texto);
-      return { ...b, completo: mapa.completo, avisos: mapa.avisos.length, sinais: sinais.length, jaExiste: !!app.mapas[b.concurso] };
-    }));
-  };
-  const importarLote = () => {
-    acoes.importarMapas(relatorioLote.map(b => ({ concurso: b.concurso, texto: b.texto })));
-    setRelatorioLote(null); setLote("");
-  };
+  const conferir = () => setRelatorio(dividirMapasEmLote(lote).map(b => ({ ...b, completo: interpretarMapa(b.texto).mapa.completo, jaExiste: !!app.mapas[b.concurso] })));
+  const importar = () => { acoes.importarMapas(relatorio.map(b => ({ concurso: b.concurso, texto: b.texto }))); setRelatorio(null); setLote(""); };
 
   return (
     <>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-        <Metrica rotulo="Concursos com resultado" valor={app.resultados.length} />
-        <Metrica rotulo="Mapas salvos" valor={nMapas} />
-        <Metrica rotulo="Mapas completos" valor={nOk} tom={nOk === nMapas ? "bom" : "alerta"} detalhe="só estes entram no motor" />
+        <Metrica rotulo="Mapas" valor={itens.length} />
+        <Metrica rotulo="Média de acertos" valor={media == null ? "—" : dec(media, 2)} />
+        <Metrica rotulo="Melhor" valor={melhor ?? "—"} tom={melhor >= 11 ? "bom" : undefined} />
+        <Metrica rotulo="11 ou mais" valor={onzeMais} tom={onzeMais ? "bom" : undefined} />
       </div>
 
-      <Card titulo="Adicionar resultado">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-          <div><Rotulo>Concurso</Rotulo><input style={estiloInput} value={novo.concurso} onChange={e => setNovo({ ...novo, concurso: e.target.value.replace(/\D/g, "") })} /></div>
-          <div><Rotulo>Data</Rotulo><input style={estiloInput} placeholder="dd/mm/aaaa" value={novo.data} onChange={e => setNovo({ ...novo, data: e.target.value })} /></div>
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <Rotulo>15 dezenas ({numerosNovo.length}/15)</Rotulo>
-          <input style={{ ...estiloInput, fontFamily: T.mono }} placeholder="01 02 04 05 …" value={novo.numeros} onChange={e => setNovo({ ...novo, numeros: e.target.value })} />
-        </div>
-        {numerosNovo.length > 0 && <div style={{ marginTop: 8 }}><Bolinhas numeros={numerosNovo} tamanho={24} /></div>}
-        <div style={{ marginTop: 10 }}>
-          <Botao disabled={!podeSalvar} onClick={() => { acoes.salvarResultado(Number(novo.concurso), novo.data, numerosNovo); setNovo({ concurso: "", data: "", numeros: "" }); }}>Salvar resultado</Botao>
-          {jaExisteOficial && <div style={{ fontSize: 12.5, color: T.alerta, marginTop: 6 }}>Este concurso já existe. Para mudar o resultado, use "Corrigir" na lista abaixo.</div>}
-        </div>
-      </Card>
+      {!itens.length && <Aviso tom="info">Nenhum mapa salvo ainda. Salve mapas na aba Mapa Horário ou importe vários de uma vez abaixo.</Aviso>}
+      {itens.map(i => <CartaoConcurso key={i.concurso} item={i} abrir={abrir} remover={acoes.removerMapa} />)}
 
-      <Card titulo="Importar mapas em lote">
-        <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8, lineHeight: 1.5 }}>
-          Cole vários mapas em inglês, cada um precedido de uma linha com o número do concurso: <code style={{ fontFamily: T.mono, color: T.goldText }}>#3650</code>, <code style={{ fontFamily: T.mono, color: T.goldText }}>Concurso 3650</code> ou <code style={{ fontFamily: T.mono, color: T.goldText }}>3650:</code>
-        </div>
-        <textarea rows={8} value={lote} onChange={e => { setLote(e.target.value); setRelatorioLote(null); }} style={{ ...estiloInput, fontFamily: T.mono, fontSize: 12 }} placeholder={"#3650\nSun in Aries 10°12’, in 6th House\n…\n\n#3651\n…"} />
-        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <Botao variante="secundario" disabled={!lote.trim()} onClick={analisarLote}>Conferir</Botao>
-          {relatorioLote?.length > 0 && <Botao onClick={importarLote}>Importar {relatorioLote.length} mapas</Botao>}
-        </div>
-        {relatorioLote && (
-          <div style={{ marginTop: 12 }}>
-            {!relatorioLote.length && <Aviso>Nenhum cabeçalho de concurso encontrado.</Aviso>}
-            <Tabela colunas={[
-              { id: "concurso", titulo: "Concurso", mono: true },
-              { id: "status", titulo: "Leitura", render: l => (l.completo ? <Chip tom="bom">completo</Chip> : <Chip tom="ruim">incompleto</Chip>) },
-              { id: "avisos", titulo: "Avisos", alinhar: "right", mono: true },
-              { id: "sinais", titulo: "Sinais", alinhar: "right", mono: true },
-              { id: "ja", titulo: "", render: l => (l.jaExiste ? <Chip tom="alerta">substitui o salvo</Chip> : null) },
-            ]} linhas={relatorioLote.map(l => ({ ...l, __id: l.concurso }))} />
-          </div>
-        )}
-      </Card>
-
-      {corrigindo && (
-        <Card titulo={`Corrigir o concurso ${corrigindo.concurso}`}>
-          <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>A correção fica registrada com motivo e data, o resultado original é preservado, e todo o aprendizado, o placar e o diário são recalculados.</div>
-          <Rotulo>Dezenas corretas ({numerosCorrecao.length}/15)</Rotulo>
-          <input style={{ ...estiloInput, fontFamily: T.mono }} value={corrigindo.numeros} onChange={e => setCorrigindo({ ...corrigindo, numeros: e.target.value })} />
-          <div style={{ marginTop: 8 }}><Rotulo>Motivo</Rotulo><input style={estiloInput} value={corrigindo.motivo} placeholder="ex.: conferido no site da Caixa" onChange={e => setCorrigindo({ ...corrigindo, motivo: e.target.value })} /></div>
+      <details style={{ marginTop: 16 }}>
+        <summary style={{ cursor: "pointer", color: T.textSoft, fontSize: 13 }}>Importar vários mapas de uma vez</summary>
+        <Card style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 8 }}>Cada mapa precedido do número do concurso: <code style={{ fontFamily: T.mono, color: T.goldText }}>#3650</code>, <code style={{ fontFamily: T.mono, color: T.goldText }}>Concurso 3650</code> ou <code style={{ fontFamily: T.mono, color: T.goldText }}>3650:</code></div>
+          <textarea rows={8} value={lote} onChange={e => { setLote(e.target.value); setRelatorio(null); }} style={{ ...estiloInput, fontFamily: T.mono, fontSize: 12 }} placeholder={"#3650\nSun in Aries 10°12’, in 6th House\n…"} />
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-            <Botao disabled={!validarResultado(numerosCorrecao) || !corrigindo.motivo.trim() || numerosCorrecao.join() === (app.resultados.find(r => r.concurso === corrigindo.concurso)?.resultado || []).join()} onClick={() => { acoes.corrigirResultado(corrigindo.concurso, numerosCorrecao, corrigindo.motivo.trim()); setCorrigindo(null); }}>Aplicar correção</Botao>
-            <Botao variante="discreto" onClick={() => setCorrigindo(null)}>Cancelar</Botao>
+            <Botao variante="secundario" disabled={!lote.trim()} onClick={conferir}>Conferir</Botao>
+            {relatorio?.length > 0 && <Botao onClick={importar}>Importar {relatorio.length} mapas</Botao>}
           </div>
-        </Card>
-      )}
-      {correcoes.length > 0 && (
-        <Card titulo="Correções aplicadas">
-          <Tabela colunas={[
-            { id: "concurso", titulo: "Concurso", mono: true },
-            { id: "de", titulo: "Original → corrigido", render: l => <div><div style={{ fontFamily: T.mono, fontSize: 12, color: T.textMuted, textDecoration: "line-through" }}>{(l.original || []).join(" ")}</div><div style={{ fontFamily: T.mono, fontSize: 12 }}>{l.resultado.join(" ")}</div></div> },
-            { id: "motivo", titulo: "Motivo", render: l => <div>{l.motivo}<div style={{ fontSize: 11, color: T.textMuted }}>{new Date(l.em).toLocaleString("pt-BR")}</div></div> },
-            { id: "x", titulo: "", render: l => <Botao pequeno variante="perigo" onClick={() => acoes.removerCorrecao(l.concurso)}>Desfazer</Botao> },
-          ]} linhas={correcoes.map(([c, v]) => ({ __id: c, concurso: Number(c), ...v }))} />
-        </Card>
-      )}
-
-      <Card titulo="Concursos" acao={
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-          {[["todos", "Todos"], ["comMapa", "Com mapa"], ["semMapa", "Sem mapa"], ["comErro", "Mapa com erro"]].map(([id, r]) => (
-            <Botao key={id} pequeno variante={filtro === id ? "secundario" : "discreto"} onClick={() => setFiltro(id)}>{r}</Botao>
-          ))}
-        </div>
-      }>
-        <Tabela colunas={[
-          { id: "concurso", titulo: "Concurso", mono: true },
-          { id: "data", titulo: "Data", mono: true },
-          { id: "resultado", titulo: "Resultado", render: l => (l.resultado ? <div><Bolinhas numeros={l.resultado} tamanho={21} />{l.corrigido && <div style={{ marginTop: 4 }}><Chip tom="alerta">corrigido</Chip></div>}</div> : <Chip tom="ouro">aguardando</Chip>) },
-          { id: "mapa", titulo: "Mapa", render: l => (!l.mapa ? <span style={{ color: T.textMuted }}>—</span> : l.leitura.mapa.completo ? <Chip tom={l.leitura.mapa.avisos.length ? "alerta" : "bom"}>{l.leitura.mapa.avisos.length ? `${l.leitura.mapa.avisos.length} avisos` : "✓"}</Chip> : <Chip tom="ruim">erro</Chip>) },
-          { id: "acoes", titulo: "", render: l => (
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-              {l.resultado && <Botao pequeno variante="discreto" onClick={() => setCorrigindo({ concurso: l.concurso, numeros: l.resultado.join(" "), motivo: "" })}>Corrigir</Botao>}
-              <Botao pequeno variante="discreto" onClick={() => abrirConcurso(l.concurso)}>{l.mapa ? "Abrir" : "Colar mapa"}</Botao>
-              {l.mapa && <Botao pequeno variante="perigo" onClick={() => { if (confirm(`Remover o mapa do concurso ${l.concurso}?`)) acoes.removerMapa(l.concurso); }}>Remover mapa</Botao>}
+          {relatorio && (
+            <div style={{ marginTop: 12 }}>
+              {!relatorio.length && <Aviso>Nenhum número de concurso encontrado.</Aviso>}
+              <Tabela colunas={[
+                { id: "concurso", titulo: "Concurso", mono: true },
+                { id: "st", titulo: "Leitura", render: l => (l.completo ? <Chip tom="bom">completo</Chip> : <Chip tom="ruim">incompleto</Chip>) },
+                { id: "ja", titulo: "", render: l => (l.jaExiste ? <Chip tom="alerta">substitui o salvo</Chip> : null) },
+              ]} linhas={relatorio.map(l => ({ ...l, __id: l.concurso }))} />
             </div>
-          ) },
-        ]} linhas={filtradas.slice(0, limite)} />
-        {filtradas.length > limite && <div style={{ textAlign: "center", marginTop: 10 }}><Botao variante="discreto" pequeno onClick={() => setLimite(limite + 60)}>Mostrar mais ({filtradas.length - limite})</Botao></div>}
-      </Card>
+          )}
+        </Card>
+      </details>
     </>
   );
 }
