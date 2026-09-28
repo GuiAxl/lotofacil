@@ -6175,7 +6175,7 @@ function AbaBackup({ app, acoes }) {
       setMsg({ tom: "alerta", txt: "Download bloqueado aqui. Copie o texto abaixo." });
     }
   };
-  const copiar = async () => {
+  const copiar2 = async () => {
     try {
       await navigator.clipboard.writeText(exportado);
       setMsg({ tom: "bom", txt: "Backup copiado." });
@@ -6200,7 +6200,7 @@ function AbaBackup({ app, acoes }) {
         <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Tudo: resultados, mapas, hipóteses e diário. Guarde uma cópia depois de importar muitos mapas.</div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Botao onClick={baixar2}>Baixar .json</Botao>
-          <Botao variante="secundario" onClick={copiar}>Copiar</Botao>
+          <Botao variante="secundario" onClick={copiar2}>Copiar</Botao>
         </div>
         <textarea readOnly rows={4} value={exportado} style={{ ...estiloInput, fontFamily: T.mono, fontSize: 11, marginTop: 10 }} />
       </Card>
@@ -7666,6 +7666,240 @@ async function fechamento(grupo, garantia, { semente = 11, amostraCandidatos = n
   };
 }
 
+// src/quantico/condicoes.js
+var CAP = 8;
+var GRUPOS = [
+  { id: "atraso", nome: "Atraso (concursos sem sair)", tam: CAP + 1, rotulo: (v) => v === CAP ? `atraso ≥ ${CAP}` : `atraso ${v}` },
+  { id: "sequencia", nome: "Sequência (concursos seguidos saindo)", tam: CAP + 1, rotulo: (v) => v === CAP ? `saiu ≥ ${CAP} seguidos` : `saiu ${v} seguido(s)` },
+  { id: "f10", nome: "Frequência nos últimos 10", tam: 11, rotulo: (v) => `${v}/10 nos últimos 10` },
+  { id: "padrao", nome: "Padrão dos 3 últimos", tam: 8, rotulo: (v) => `padrão ${[4, 2, 1].map((b) => v & b ? "●" : "○").join("")} (anterior→3º)` },
+  { id: "vizinhos", nome: "Vizinhos (n±1) no anterior", tam: 3, rotulo: (v) => `${v} vizinho(s) no anterior` },
+  { id: "par1", nome: "Par: dezena m no anterior → n", tam: 625, rotulo: (v) => `${String(v % 25 + 1).padStart(2, "0")} saiu no anterior` },
+  { id: "par2", nome: "Par: dezena m no penúltimo → n", tam: 625, rotulo: (v) => `${String(v % 25 + 1).padStart(2, "0")} saiu no penúltimo` },
+  { id: "dezAtraso", nome: "Atraso próprio da dezena", tam: 25 * (CAP + 1), rotulo: (v) => `esta dezena com atraso ${v % (CAP + 1) === CAP ? `≥ ${CAP}` : v % (CAP + 1)}` }
+];
+var OFF = [];
+{
+  let o = 0;
+  for (const g of GRUPOS) {
+    OFF.push(o);
+    o += g.tam;
+  }
+  OFF.push(o);
+}
+var NCOND = OFF[GRUPOS.length];
+var NHIPOTESES = NCOND;
+var Z_LIMIAR = 4.2;
+var CANDIDATAS = 20;
+var Z_CONFIRMA = 2.81;
+var SHRINK = 60;
+function novoEstado() {
+  return {
+    t: 0,
+    res: new Float64Array(NCOND),
+    vr: new Float64Array(NCOND),
+    n: new Int32Array(NCOND),
+    k: new Int32Array(NCOND),
+    presencas: new Float64Array(26),
+    atraso: new Int32Array(26).fill(0),
+    seq: new Int32Array(26)
+  };
+}
+var copiar = (e) => ({ t: e.t, res: e.res.slice(), vr: e.vr.slice(), n: e.n.slice(), k: e.k.slice(), presencas: e.presencas.slice(), atraso: e.atraso.slice(), seq: e.seq.slice() });
+var taxaDezena = (e, n) => (e.presencas[n] + 12) / (e.t + 20);
+function condicoesAtivas(e, S, n) {
+  const t = e.t, ant = t > 0 ? S[t - 1] : null, pen = t > 1 ? S[t - 2] : null;
+  const a = Math.min(e.atraso[n], CAP), s = Math.min(e.seq[n], CAP);
+  let f10 = 0, pad = 0;
+  for (let j = 1; j <= 10 && t - j >= 0; j++) if (S[t - j].has(n)) {
+    f10++;
+    if (j <= 3) pad |= 1 << 3 - j;
+  }
+  const idx = [OFF[0] + a, OFF[1] + s, OFF[2] + f10, OFF[3] + pad];
+  if (ant) {
+    idx.push(OFF[4] + (ant.has(n - 1) ? 1 : 0) + (ant.has(n + 1) ? 1 : 0));
+    for (const m of ant) if (m !== n) idx.push(OFF[5] + (n - 1) * 25 + (m - 1));
+  }
+  if (pen) {
+    for (const m of pen) if (m !== n) idx.push(OFF[6] + (n - 1) * 25 + (m - 1));
+  }
+  idx.push(OFF[7] + (n - 1) * (CAP + 1) + a);
+  return idx;
+}
+function aprender2(e, S) {
+  const t = e.t, sorteio = S[t];
+  for (let n = 1; n <= 25; n++) {
+    const pb = taxaDezena(e, n), y = sorteio.has(n) ? 1 : 0;
+    for (const c of condicoesAtivas(e, S, n)) {
+      e.res[c] += y - pb;
+      e.vr[c] += pb * (1 - pb);
+      e.n[c]++;
+      e.k[c] += y;
+    }
+  }
+  for (let n = 1; n <= 25; n++) {
+    if (sorteio.has(n)) {
+      e.presencas[n]++;
+      e.atraso[n] = 0;
+      e.seq[n]++;
+    } else {
+      e.atraso[n]++;
+      e.seq[n] = 0;
+    }
+  }
+  e.t++;
+}
+var grupoDe = (c) => {
+  let g = 0;
+  while (c >= OFF[g + 1]) g++;
+  return g;
+};
+var zDe = (e, c) => e.vr[c] > 0 ? e.res[c] / Math.sqrt(e.vr[c]) : 0;
+var liftDe = (e, c) => e.res[c] / (e.vr[c] + SHRINK * 0.24);
+function liftsPorGrupo(e, cs) {
+  const soma = new Float64Array(GRUPOS.length), cont = new Int32Array(GRUPOS.length);
+  for (const c of cs) {
+    const g = grupoDe(c);
+    soma[g] += liftDe(e, c);
+    cont[g]++;
+  }
+  for (let g = 0; g < GRUPOS.length; g++) if (cont[g]) soma[g] /= cont[g];
+  return soma;
+}
+function criarVarredor(sorteios) {
+  const S = sorteios.map((d) => new Set(d));
+  const fotos = [];
+  const e = novoEstado();
+  for (let t = 0; t < S.length; t++) {
+    if (t % 100 === 0) fotos.push(copiar(e));
+    aprender2(e, S);
+  }
+  const estadoEm = (t) => {
+    const f = copiar(fotos[Math.min(fotos.length - 1, Math.floor(t / 100))]);
+    while (f.t < t) aprender2(f, S);
+    return f;
+  };
+  return { S, estadoEm, final: e };
+}
+function explicarConcurso(varredor, t) {
+  const e = varredor.estadoEm(t), S = varredor.S, sorteio = S[t];
+  return Array.from({ length: 25 }, (_, i) => {
+    const n = i + 1, pb = taxaDezena(e, n);
+    const conds = condicoesAtivas(e, S, n).map((c) => {
+      const g = grupoDe(c);
+      return { grupo: GRUPOS[g].id, nomeGrupo: GRUPOS[g].nome, descricao: GRUPOS[g].rotulo(c - OFF[g]), vezes: e.n[c], taxa: e.n[c] ? e.k[c] / e.n[c] : NaN, excesso: e.n[c] ? e.res[c] / e.n[c] : 0, z: zDe(e, c), lift: liftDe(e, c) };
+    }).sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+    const logit3 = Math.log(pb / (1 - pb)) + liftsPorGrupo(e, condicoesAtivas(e, S, n)).reduce((s, l) => s + l, 0);
+    return { n, saiu: sorteio ? sorteio.has(n) : null, taxaDezena: pb, pCondicional: 1 / (1 + Math.exp(-logit3)), conds, maisForte: conds[0], acimaDoLimiar: conds.filter((c) => Math.abs(c.z) > Z_LIMIAR).length };
+  });
+}
+async function varrerSinais(sorteios, { fracaoDescoberta = 0.6, aoProgresso } = {}) {
+  const S = sorteios.map((d) => new Set(d)), T2 = S.length, corte = Math.floor(T2 * fracaoDescoberta);
+  const e = novoEstado();
+  const parte = [0, 1].map(() => ({ res: new Float64Array(NCOND), vr: new Float64Array(NCOND), n: new Int32Array(NCOND) }));
+  const G = GRUPOS.length, ganho = Array.from({ length: G }, () => [0, 0]), ganhoTodos = [0, 0];
+  const ll = (p, y) => y ? Math.log(p) : Math.log(1 - p);
+  const calibra = (z2) => {
+    let c = 0;
+    for (let it = 0; it < 25; it++) {
+      let s = 0, d = 0;
+      for (let n = 1; n <= 25; n++) {
+        const q = 1 / (1 + Math.exp(-(z2[n] + c)));
+        s += q;
+        d += q * (1 - q);
+      }
+      const p = (s - 15) / d;
+      c -= p;
+      if (Math.abs(p) < 1e-9) break;
+    }
+    return c;
+  };
+  for (let t = 0; t < T2; t++) {
+    if (t >= 20) {
+      const o = t < corte ? 0 : 1, base = new Float64Array(26), zs = Array.from({ length: G + 1 }, () => new Float64Array(26)), ativas = [];
+      for (let n = 1; n <= 25; n++) {
+        const pb = taxaDezena(e, n), l0 = Math.log(pb / (1 - pb)), cs = condicoesAtivas(e, S, n);
+        base[n] = pb;
+        ativas[n] = cs;
+        for (let g = 0; g <= G; g++) zs[g][n] = l0;
+        const lg = liftsPorGrupo(e, cs);
+        for (let g = 0; g < G; g++) {
+          zs[g][n] += lg[g];
+          zs[G][n] += lg[g];
+        }
+      }
+      for (let g = 0; g <= G; g++) {
+        const c = calibra(zs[g]);
+        let d = 0;
+        for (let n = 1; n <= 25; n++) {
+          const y = S[t].has(n) ? 1 : 0, q = 1 / (1 + Math.exp(-(zs[g][n] + c)));
+          d += ll(q, y) - ll(base[n], y);
+        }
+        if (g < G) ganho[g][o] += d;
+        else ganhoTodos[o] += d;
+      }
+      for (let n = 1; n <= 25; n++) {
+        const y = S[t].has(n) ? 1 : 0, pb = base[n];
+        for (const c of ativas[n]) {
+          parte[o].res[c] += y - pb;
+          parte[o].vr[c] += pb * (1 - pb);
+          parte[o].n[c]++;
+        }
+      }
+    }
+    aprender2(e, S);
+    if (t % 250 === 0) {
+      aoProgresso?.(t / T2);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+  const z = (p, c) => p.vr[c] > 0 ? p.res[c] / Math.sqrt(p.vr[c]) : 0;
+  const Phi = (x) => {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2), q = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - q : q;
+  };
+  const todas = [];
+  for (let c = 0; c < NCOND; c++) if (parte[0].n[c] >= 100 && parte[1].n[c] >= 60) {
+    const g = grupoDe(c), z1 = z(parte[0], c), z2 = z(parte[1], c);
+    todas.push({ c, g, descricao: GRUPOS[g].rotulo(c - OFF[g]), dezena: g >= 5 ? Math.floor((c - OFF[g]) / (g === 7 ? CAP + 1 : 25)) + 1 : null, z1, z2, e1: parte[0].res[c] / parte[0].n[c], e2: parte[1].res[c] / parte[1].n[c], p1: 2 * (1 - Phi(Math.abs(z1))) });
+  }
+  const ord = todas.map((h, i) => [h.p1, i]).sort((a, b) => a[0] - b[0]);
+  let min = 1;
+  for (let r = ord.length - 1; r >= 0; r--) {
+    min = Math.min(min, ord[r][0] * ord.length / (r + 1));
+    todas[ord[r][1]].q1 = min;
+  }
+  const correl = (A) => {
+    if (A.length < 3) return NaN;
+    const m1 = A.reduce((s, h) => s + h.z1, 0) / A.length, m2 = A.reduce((s, h) => s + h.z2, 0) / A.length;
+    let a = 0, b = 0, d = 0;
+    for (const h of A) {
+      a += (h.z1 - m1) * (h.z2 - m2);
+      b += (h.z1 - m1) ** 2;
+      d += (h.z2 - m2) ** 2;
+    }
+    return a / Math.sqrt(b * d);
+  };
+  const candidatas = new Set([...todas].sort((a, b) => Math.abs(b.z1) - Math.abs(a.z1)).slice(0, CANDIDATAS).filter((h) => Math.abs(h.z1) > 2));
+  const confirmada = (h) => candidatas.has(h) && Math.sign(h.z2) === Math.sign(h.z1) && Math.abs(h.z2) > Z_CONFIRMA;
+  const grupos = GRUPOS.map((gr, g) => {
+    const A = todas.filter((h) => h.g === g);
+    return {
+      id: gr.id,
+      nome: gr.nome,
+      hipoteses: A.length,
+      descobertas: A.filter((h) => candidatas.has(h)).length,
+      confirmadas: A.filter(confirmada).length,
+      correlacao: correl(A),
+      ganhoDescoberta: ganho[g][0],
+      ganhoConfirmacao: ganho[g][1]
+    };
+  });
+  const destaques = [...candidatas].map((h) => ({ ...h, grupo: GRUPOS[h.g].nome, confirmada: confirmada(h) }));
+  aoProgresso?.(1);
+  return { T: T2, corte, grupos, destaques, hipoteses: todas.length, correlacaoGeral: correl(todas), ganhoTodos, confirmadas: todas.filter(confirmada).length };
+}
+
 // src/ui/AbaQuantico.jsx
 var reais = (v) => v == null || !Number.isFinite(v) ? "—" : v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: v < 10 ? 2 : 0 });
 var SECOES = [["laudo", "Laudo"], ["previsao", "Previsão"], ["popularidade", "Popularidade"], ["gerador", "Gerador"], ["fechamento", "Fechamento"]];
@@ -7747,11 +7981,71 @@ function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
       </div>
     </div>;
 }
+function PorQueSaiu({ d, concurso }) {
+  const ex = d.ex;
+  return <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface2 }}>
+      <div style={{ fontSize: 13.5, marginBottom: 6 }}>
+        <b style={{ color: T.goldText }}>Dezena {formatarNum(d.n)}</b> · concurso {concurso}: {d.saiu ? <Chip tom="bom">saiu</Chip> : <Chip>não saiu</Chip>}
+      </div>
+      <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>
+        Antes do sorteio ela saía em {pct(ex.taxaDezena, 1)} dos concursos. Somando o que cada tipo de condição rendia até ali (com encolhimento bayesiano), a chance dela era {pct(ex.pCondicional, 1)}. Cada linha mostra quantas vezes a condição aconteceu antes, quanto a dezena saiu nessas vezes e a força da evidência (z; acreditar só acima de {dec(Z_LIMIAR, 1)}).
+      </div>
+      <Tabela colunas={[
+    { id: "descricao", titulo: "Condição antes do sorteio", render: (c) => <div><div>{c.descricao}</div><div style={{ fontSize: 11, color: T.textMuted }}>{c.nomeGrupo}</div></div> },
+    { id: "vezes", titulo: "Vezes antes", alinhar: "right", mono: true, render: (c) => c.vezes.toLocaleString("pt-BR") },
+    { id: "taxa", titulo: "Saiu nessas vezes", alinhar: "right", mono: true, render: (c) => c.vezes ? pct(c.taxa, 1) : "—" },
+    { id: "exc", titulo: "Acima da própria taxa", alinhar: "right", mono: true, render: (c) => <span style={{ color: c.excesso > 0 ? T.bom : c.excesso < 0 ? T.ruim : T.text }}>{c.excesso >= 0 ? "+" : ""}{dec(c.excesso * 100, 2)} p.p.</span> },
+    { id: "z", titulo: "z", alinhar: "right", mono: true, render: (c) => <span style={{ color: Math.abs(c.z) > Z_LIMIAR ? T.goldText : T.text, fontWeight: Math.abs(c.z) > Z_LIMIAR ? 700 : 400 }}>{c.z >= 0 ? "+" : ""}{dec(c.z, 2)}</span> },
+    { id: "ok", titulo: "", render: (c) => d.saiu == null ? null : c.excesso > 0 === d.saiu ? <Chip tom="bom">apontou certo</Chip> : <Chip tom="ruim">apontou errado</Chip> }
+  ]} linhas={ex.conds.map((c, i) => ({ ...c, __id: i }))} />
+    </div>;
+}
+function VarreduraSinais({ sorteios }) {
+  const [res, setRes] = useState9(null);
+  const [prog, setProg] = useState9(null);
+  const rodar = async () => {
+    setProg(0);
+    setRes(await varrerSinais(sorteios, { aoProgresso: setProg }));
+    setProg(null);
+  };
+  return <div style={{ marginTop: 16 }}>
+      <Rotulo>Varredura de sinais · descobre no passado, confirma no futuro</Rotulo>
+      <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>
+        Testa todas as condições "o que saiu antes → o que saiu agora", contra a taxa de cada dezena. Descoberta nos primeiros 60% do histórico: as {CANDIDATAS} condições mais fortes viram candidatas. Só valem se repetirem, no mesmo sentido, nos 40% seguintes, com z &gt; {dec(Z_CONFIRMA, 2)} (5% corrigido para {CANDIDATAS} candidatas). Ao mesmo tempo, cada tipo de condição é usado como previsor concurso a concurso, e o ganho em nats contra a taxa da própria dezena mostra se ele de fato ajuda a prever.
+      </div>
+      {!res && <Botao onClick={rodar} disabled={prog != null}>{prog != null ? `Varrendo… ${Math.round(prog * 100)}%` : "Varrer sinais no histórico"}</Botao>}
+      {res && <>
+          <Aviso tom={res.confirmadas ? "bom" : "info"}>
+            {res.hipoteses.toLocaleString("pt-BR")} condições testadas em {res.T.toLocaleString("pt-BR")} concursos (descoberta até o {res.corte}º). {res.confirmadas ? `${res.confirmadas} confirmada(s) fora da amostra.` : "Nenhuma se confirmou fora da amostra."} Correlação entre a força na descoberta e na confirmação: {dec(res.correlacaoGeral, 3)} (0 = o que parecia sinal não se repete). Usando tudo junto como previsor: {res.ganhoTodos[0] >= 0 ? "+" : ""}{dec(res.ganhoTodos[0], 1)} nats na descoberta, {res.ganhoTodos[1] >= 0 ? "+" : ""}{dec(res.ganhoTodos[1], 1)} na confirmação.
+          </Aviso>
+          <Tabela colunas={[
+    { id: "nome", titulo: "Tipo de condição" },
+    { id: "hipoteses", titulo: "Condições", alinhar: "right", mono: true },
+    { id: "descobertas", titulo: "Candidatas", alinhar: "right", mono: true },
+    { id: "confirmadas", titulo: "Confirmadas", alinhar: "right", mono: true, render: (l) => <span style={{ color: l.confirmadas ? T.bom : T.text }}>{l.confirmadas}</span> },
+    { id: "correlacao", titulo: "Repete? (correl.)", alinhar: "right", mono: true, render: (l) => Number.isFinite(l.correlacao) ? dec(l.correlacao, 2) : "—" },
+    { id: "g", titulo: "Ganho previsor (desc. · conf.)", alinhar: "right", mono: true, render: (l) => <span style={{ color: l.ganhoConfirmacao > 0 ? T.bom : T.ruim }}>{dec(l.ganhoDescoberta, 1)} · {dec(l.ganhoConfirmacao, 1)} nats</span> }
+  ]} linhas={res.grupos.map((g) => ({ ...g, __id: g.id }))} />
+          <div style={{ marginTop: 10 }}>
+            <Rotulo>As {CANDIDATAS} candidatas da descoberta, e o que fizeram depois</Rotulo>
+            <Tabela colunas={[
+    { id: "d", titulo: "Condição", render: (h) => <div><div>{h.dezena ? `dezena ${formatarNum(h.dezena)} · ` : ""}{h.descricao}</div><div style={{ fontSize: 11, color: T.textMuted }}>{h.grupo}</div></div> },
+    { id: "z1", titulo: "Descoberta", alinhar: "right", mono: true, render: (h) => `${h.e1 >= 0 ? "+" : ""}${dec(h.e1 * 100, 2)} p.p. · z ${dec(h.z1, 1)}` },
+    { id: "z2", titulo: "Confirmação", alinhar: "right", mono: true, render: (h) => `${h.e2 >= 0 ? "+" : ""}${dec(h.e2 * 100, 2)} p.p. · z ${dec(h.z2, 1)}` },
+    { id: "v", titulo: "", render: (h) => h.confirmada ? <Chip tom="bom">confirmou</Chip> : Math.sign(h.z2) !== Math.sign(h.z1) ? <Chip tom="ruim">inverteu</Chip> : <Chip>enfraqueceu</Chip> }
+  ]} linhas={res.destaques.map((h) => ({ ...h, __id: h.c }))} />
+          </div>
+        </>}
+    </div>;
+}
 function MaquinaDoTempo({ res, sorteios, concursos }) {
   const regs = res.registros;
   const [i, setI] = useState9(regs.length - 1);
   const [ordem, setOrdem] = useState9("prob");
+  const [aberta, setAberta] = useState9(null);
+  const varredor = useMemo6(() => criarVarredor(sorteios), [sorteios]);
   const reg = regs[Math.max(0, Math.min(regs.length - 1, i))];
+  const porque = useMemo6(() => reg ? explicarConcurso(varredor, reg.t) : null, [varredor, reg]);
   if (!reg) return null;
   const t = reg.t, saiu = new Set(reg.sorteio), jogoSet = new Set(reg.jogo);
   const antes = sorteios.slice(Math.max(0, t - 10), t).map((d, k) => ({ concurso: concursos[Math.max(0, t - 10) + k], set: new Set(d) }));
@@ -7762,7 +8056,7 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
     let atraso = 0;
     for (let j = t - 1; j >= 0 && !sorteios[j].includes(n); j--) atraso++;
     const f10 = sorteios.slice(Math.max(0, t - 10), t).filter((d) => d.includes(n)).length;
-    return { n, anterior: t > 0 && sorteios[t - 1].includes(n), atraso, f10, prob: reg.probs[n], pos: posicao(n), saiu: saiu.has(n), noJogo: jogoSet.has(n) };
+    return { n, anterior: t > 0 && sorteios[t - 1].includes(n), atraso, f10, prob: reg.probs[n], pos: posicao(n), saiu: saiu.has(n), noJogo: jogoSet.has(n), ex: porque[k] };
   });
   const ordenado = [...ctx].sort((a, b) => ordem === "prob" ? b.prob - a.prob : ordem === "saiu" ? b.saiu - a.saiu || b.prob - a.prob : a.n - b.n);
   const posMediaSorteadas = ctx.filter((c) => c.saiu).reduce((a, c) => a + c.pos, 0) / 15;
@@ -7777,6 +8071,10 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
     return { familia: f, placar: sim / 15 - nao / 10 };
   }).sort((a, b) => b.placar - a.placar);
   const vizinhos = regs.slice(Math.max(0, i - 25), i + 26);
+  const sorteadas = ctx.filter((c) => c.saiu), naoSorteadas = ctx.filter((c) => !c.saiu);
+  const mediaCond = (A) => A.reduce((a, c) => a + c.ex.pCondicional, 0) / A.length;
+  const comLimiar = ctx.filter((c) => c.ex.acimaDoLimiar > 0);
+  const dAberta = aberta ? ctx[aberta - 1] : null;
   return <Card titulo="Máquina do tempo · concurso a concurso">
       <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Para cada concurso o motor só enxerga o que saiu <b style={{ color: T.goldText }}>antes</b> dele. Escolha um concurso e veja o passado que ele usou, o que previu, o que saiu e quem apontou certo.</div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
@@ -7840,15 +8138,34 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
           </div>
         </div>
         <Tabela colunas={[
-    { id: "n", titulo: "Dezena", mono: true, render: (l) => formatarNum(l.n) },
+    { id: "n", titulo: "Dezena", mono: true, render: (l) => <Botao pequeno variante={aberta === l.n ? "secundario" : "discreto"} onClick={() => setAberta(aberta === l.n ? null : l.n)}>{formatarNum(l.n)} ▾</Botao> },
     { id: "ant", titulo: "Saiu no anterior?", render: (l) => l.anterior ? "sim" : "não" },
     { id: "atraso", titulo: "Atraso", alinhar: "right", mono: true },
     { id: "f10", titulo: "Nos últimos 10", alinhar: "right", mono: true, render: (l) => `${l.f10}/10` },
-    { id: "prob", titulo: "Prob. prevista", alinhar: "right", mono: true, render: (l) => pct(l.prob, 2) },
+    { id: "taxa", titulo: "Taxa da dezena até ali", alinhar: "right", mono: true, render: (l) => pct(l.ex.taxaDezena, 1) },
+    { id: "forte", titulo: "Evidência mais forte antes", render: (l) => {
+      const c = l.ex.maisForte;
+      return <div><div style={{ fontSize: 12 }}>{c.descricao}</div><div style={{ fontSize: 11, fontFamily: T.mono, color: Math.abs(c.z) > Z_LIMIAR ? T.goldText : T.textMuted }}>{pct(c.taxa, 1)} em {c.vezes.toLocaleString("pt-BR")}× · z {c.z >= 0 ? "+" : ""}{dec(c.z, 1)}</div></div>;
+    } },
+    { id: "pc", titulo: "Pelas condições", alinhar: "right", mono: true, render: (l) => pct(l.ex.pCondicional, 1) },
+    { id: "prob", titulo: "Prob. do motor", alinhar: "right", mono: true, render: (l) => pct(l.prob, 2) },
     { id: "pos", titulo: "Posição", alinhar: "right", mono: true, render: (l) => `${l.pos}º${l.noJogo ? " · no jogo" : ""}` },
     { id: "saiu", titulo: "Saiu?", render: (l) => l.saiu ? <Chip tom={l.noJogo ? "bom" : "alerta"}>saiu{l.noJogo ? "" : " (fora do jogo)"}</Chip> : <Chip>não</Chip> }
   ]} linhas={ordenado.map((c) => ({ ...c, __id: c.n }))} />
+        {dAberta && <PorQueSaiu d={dAberta} concurso={reg.concurso} />}
       </div>
+
+      <div style={{ marginTop: 14 }}>
+        <Rotulo>Por que saiu? · o que o passado dizia sobre as sorteadas</Rotulo>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+          <Metrica rotulo="Prob. pelas condições · sorteadas" valor={pct(mediaCond(sorteadas), 1)} detalhe={`não sorteadas: ${pct(mediaCond(naoSorteadas), 1)}`} tom={mediaCond(sorteadas) > mediaCond(naoSorteadas) ? "bom" : "ruim"} />
+          <Metrica rotulo="Dezenas com evidência forte" valor={comLimiar.length} detalhe={`|z| > ${dec(Z_LIMIAR, 1)} (${NHIPOTESES.toLocaleString("pt-BR")} condições)`} />
+        </div>
+        <Aviso tom={comLimiar.length ? "alerta" : "info"}>
+          {comLimiar.length ? `${comLimiar.map((c) => formatarNum(c.n)).join(", ")} estava(m) numa condição com evidência acima do limiar antes deste concurso. Abra a dezena (▾) para ver qual e quanto ela rendeu.` : `Antes do concurso ${reg.concurso}, nenhuma das ${NHIPOTESES.toLocaleString("pt-BR")} condições (atraso, sequência, últimos 10, padrão, vizinhos, pares com o anterior e o penúltimo, atraso de cada dezena) tinha evidência acima do limiar. As sorteadas saíram sem uma causa detectável no passado. Clique numa dezena (▾) para ver cada condição e quanto ela rendia até ali.`}
+        </Aviso>
+      </div>
+      <VarreduraSinais sorteios={sorteios} />
     </Card>;
 }
 function PainelOmega({ ins }) {

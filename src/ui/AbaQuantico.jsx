@@ -7,6 +7,7 @@ import { gerarLaudo } from "../quantico/laudo.js";
 import { simularAsync, prever, testeTemporal, scannerAblacao, governanca, contrafactual, explicarDezena, explicarEscolha, redundanciaFamilias, resumoMudancas, inspecionar, FAMILIAS, FAMILIAS_SINAL, BASELINES } from "../quantico/motor.js";
 import { ajustarPopularidade, avaliarPopularidade, premioEsperado } from "../quantico/popularidade.js";
 import { gerarPortfolio, retornoEsperado, simularConjunto, fechamento } from "../quantico/otimizador.js";
+import { criarVarredor, explicarConcurso, varrerSinais, Z_LIMIAR, NHIPOTESES, CANDIDATAS, Z_CONFIRMA } from "../quantico/condicoes.js";
 import { media } from "../estatistica/matematica.js";
 import { relatorio } from "../estatistica/metricas.js";
 import Diagnostico from "./Diagnostico.jsx";
@@ -98,11 +99,77 @@ function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
 
 // Máquina do tempo: um concurso por vez. O motor só enxerga o que saiu ANTES
 // dele; aqui se vê o passado que ele usou, a previsão, o que saiu e quem acertou.
+function PorQueSaiu({ d, concurso }) {
+  const ex = d.ex;
+  return (
+    <div style={{ marginTop: 10, padding: 12, borderRadius: 10, border: `1px solid ${T.border}`, background: T.surface2 }}>
+      <div style={{ fontSize: 13.5, marginBottom: 6 }}>
+        <b style={{ color: T.goldText }}>Dezena {formatarNum(d.n)}</b> · concurso {concurso}: {d.saiu ? <Chip tom="bom">saiu</Chip> : <Chip>não saiu</Chip>}
+      </div>
+      <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>
+        Antes do sorteio ela saía em {pct(ex.taxaDezena, 1)} dos concursos. Somando o que cada tipo de condição rendia até ali (com encolhimento bayesiano), a chance dela era {pct(ex.pCondicional, 1)}. Cada linha mostra quantas vezes a condição aconteceu antes, quanto a dezena saiu nessas vezes e a força da evidência (z; acreditar só acima de {dec(Z_LIMIAR, 1)}).
+      </div>
+      <Tabela colunas={[
+        { id: "descricao", titulo: "Condição antes do sorteio", render: c => <div><div>{c.descricao}</div><div style={{ fontSize: 11, color: T.textMuted }}>{c.nomeGrupo}</div></div> },
+        { id: "vezes", titulo: "Vezes antes", alinhar: "right", mono: true, render: c => c.vezes.toLocaleString("pt-BR") },
+        { id: "taxa", titulo: "Saiu nessas vezes", alinhar: "right", mono: true, render: c => (c.vezes ? pct(c.taxa, 1) : "—") },
+        { id: "exc", titulo: "Acima da própria taxa", alinhar: "right", mono: true, render: c => <span style={{ color: c.excesso > 0 ? T.bom : c.excesso < 0 ? T.ruim : T.text }}>{c.excesso >= 0 ? "+" : ""}{dec(c.excesso * 100, 2)} p.p.</span> },
+        { id: "z", titulo: "z", alinhar: "right", mono: true, render: c => <span style={{ color: Math.abs(c.z) > Z_LIMIAR ? T.goldText : T.text, fontWeight: Math.abs(c.z) > Z_LIMIAR ? 700 : 400 }}>{c.z >= 0 ? "+" : ""}{dec(c.z, 2)}</span> },
+        { id: "ok", titulo: "", render: c => (d.saiu == null ? null : (c.excesso > 0) === d.saiu ? <Chip tom="bom">apontou certo</Chip> : <Chip tom="ruim">apontou errado</Chip>) },
+      ]} linhas={ex.conds.map((c, i) => ({ ...c, __id: i }))} />
+    </div>
+  );
+}
+
+function VarreduraSinais({ sorteios }) {
+  const [res, setRes] = useState(null);
+  const [prog, setProg] = useState(null);
+  const rodar = async () => { setProg(0); setRes(await varrerSinais(sorteios, { aoProgresso: setProg })); setProg(null); };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <Rotulo>Varredura de sinais · descobre no passado, confirma no futuro</Rotulo>
+      <div style={{ fontSize: 12.5, color: T.textSoft, marginBottom: 8 }}>
+        Testa todas as condições "o que saiu antes → o que saiu agora", contra a taxa de cada dezena. Descoberta nos primeiros 60% do histórico: as {CANDIDATAS} condições mais fortes viram candidatas. Só valem se repetirem, no mesmo sentido, nos 40% seguintes, com z &gt; {dec(Z_CONFIRMA, 2)} (5% corrigido para {CANDIDATAS} candidatas). Ao mesmo tempo, cada tipo de condição é usado como previsor concurso a concurso, e o ganho em nats contra a taxa da própria dezena mostra se ele de fato ajuda a prever.
+      </div>
+      {!res && <Botao onClick={rodar} disabled={prog != null}>{prog != null ? `Varrendo… ${Math.round(prog * 100)}%` : "Varrer sinais no histórico"}</Botao>}
+      {res && (
+        <>
+          <Aviso tom={res.confirmadas ? "bom" : "info"}>
+            {res.hipoteses.toLocaleString("pt-BR")} condições testadas em {res.T.toLocaleString("pt-BR")} concursos (descoberta até o {res.corte}º). {res.confirmadas
+              ? `${res.confirmadas} confirmada(s) fora da amostra.`
+              : "Nenhuma se confirmou fora da amostra."} Correlação entre a força na descoberta e na confirmação: {dec(res.correlacaoGeral, 3)} (0 = o que parecia sinal não se repete). Usando tudo junto como previsor: {res.ganhoTodos[0] >= 0 ? "+" : ""}{dec(res.ganhoTodos[0], 1)} nats na descoberta, {res.ganhoTodos[1] >= 0 ? "+" : ""}{dec(res.ganhoTodos[1], 1)} na confirmação.
+          </Aviso>
+          <Tabela colunas={[
+            { id: "nome", titulo: "Tipo de condição" },
+            { id: "hipoteses", titulo: "Condições", alinhar: "right", mono: true },
+            { id: "descobertas", titulo: "Candidatas", alinhar: "right", mono: true },
+            { id: "confirmadas", titulo: "Confirmadas", alinhar: "right", mono: true, render: l => <span style={{ color: l.confirmadas ? T.bom : T.text }}>{l.confirmadas}</span> },
+            { id: "correlacao", titulo: "Repete? (correl.)", alinhar: "right", mono: true, render: l => (Number.isFinite(l.correlacao) ? dec(l.correlacao, 2) : "—") },
+            { id: "g", titulo: "Ganho previsor (desc. · conf.)", alinhar: "right", mono: true, render: l => <span style={{ color: l.ganhoConfirmacao > 0 ? T.bom : T.ruim }}>{dec(l.ganhoDescoberta, 1)} · {dec(l.ganhoConfirmacao, 1)} nats</span> },
+          ]} linhas={res.grupos.map(g => ({ ...g, __id: g.id }))} />
+          <div style={{ marginTop: 10 }}>
+            <Rotulo>As {CANDIDATAS} candidatas da descoberta, e o que fizeram depois</Rotulo>
+            <Tabela colunas={[
+              { id: "d", titulo: "Condição", render: h => <div><div>{h.dezena ? `dezena ${formatarNum(h.dezena)} · ` : ""}{h.descricao}</div><div style={{ fontSize: 11, color: T.textMuted }}>{h.grupo}</div></div> },
+              { id: "z1", titulo: "Descoberta", alinhar: "right", mono: true, render: h => `${h.e1 >= 0 ? "+" : ""}${dec(h.e1 * 100, 2)} p.p. · z ${dec(h.z1, 1)}` },
+              { id: "z2", titulo: "Confirmação", alinhar: "right", mono: true, render: h => `${h.e2 >= 0 ? "+" : ""}${dec(h.e2 * 100, 2)} p.p. · z ${dec(h.z2, 1)}` },
+              { id: "v", titulo: "", render: h => (h.confirmada ? <Chip tom="bom">confirmou</Chip> : Math.sign(h.z2) !== Math.sign(h.z1) ? <Chip tom="ruim">inverteu</Chip> : <Chip>enfraqueceu</Chip>) },
+            ]} linhas={res.destaques.map(h => ({ ...h, __id: h.c }))} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function MaquinaDoTempo({ res, sorteios, concursos }) {
   const regs = res.registros;
   const [i, setI] = useState(regs.length - 1);
   const [ordem, setOrdem] = useState("prob");
+  const [aberta, setAberta] = useState(null);
+  const varredor = useMemo(() => criarVarredor(sorteios), [sorteios]);
   const reg = regs[Math.max(0, Math.min(regs.length - 1, i))];
+  const porque = useMemo(() => (reg ? explicarConcurso(varredor, reg.t) : null), [varredor, reg]);
   if (!reg) return null;
   const t = reg.t, saiu = new Set(reg.sorteio), jogoSet = new Set(reg.jogo);
   const antes = sorteios.slice(Math.max(0, t - 10), t).map((d, k) => ({ concurso: concursos[Math.max(0, t - 10) + k], set: new Set(d) }));
@@ -114,7 +181,7 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
     let atraso = 0;
     for (let j = t - 1; j >= 0 && !sorteios[j].includes(n); j--) atraso++;
     const f10 = sorteios.slice(Math.max(0, t - 10), t).filter(d => d.includes(n)).length;
-    return { n, anterior: t > 0 && sorteios[t - 1].includes(n), atraso, f10, prob: reg.probs[n], pos: posicao(n), saiu: saiu.has(n), noJogo: jogoSet.has(n) };
+    return { n, anterior: t > 0 && sorteios[t - 1].includes(n), atraso, f10, prob: reg.probs[n], pos: posicao(n), saiu: saiu.has(n), noJogo: jogoSet.has(n), ex: porque[k] };
   });
   const ordenado = [...ctx].sort((a, b) => (ordem === "prob" ? b.prob - a.prob : ordem === "saiu" ? (b.saiu - a.saiu) || (b.prob - a.prob) : a.n - b.n));
   const posMediaSorteadas = ctx.filter(c => c.saiu).reduce((a, c) => a + c.pos, 0) / 15;
@@ -127,6 +194,10 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
     return { familia: f, placar: sim / 15 - nao / 10 };
   }).sort((a, b) => b.placar - a.placar);
   const vizinhos = regs.slice(Math.max(0, i - 25), i + 26);
+  const sorteadas = ctx.filter(c => c.saiu), naoSorteadas = ctx.filter(c => !c.saiu);
+  const mediaCond = A => A.reduce((a, c) => a + c.ex.pCondicional, 0) / A.length;
+  const comLimiar = ctx.filter(c => c.ex.acimaDoLimiar > 0);
+  const dAberta = aberta ? ctx[aberta - 1] : null;
   return (
     <Card titulo="Máquina do tempo · concurso a concurso">
       <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Para cada concurso o motor só enxerga o que saiu <b style={{ color: T.goldText }}>antes</b> dele. Escolha um concurso e veja o passado que ele usou, o que previu, o que saiu e quem apontou certo.</div>
@@ -185,15 +256,33 @@ function MaquinaDoTempo({ res, sorteios, concursos }) {
           </div>
         </div>
         <Tabela colunas={[
-          { id: "n", titulo: "Dezena", mono: true, render: l => formatarNum(l.n) },
+          { id: "n", titulo: "Dezena", mono: true, render: l => <Botao pequeno variante={aberta === l.n ? "secundario" : "discreto"} onClick={() => setAberta(aberta === l.n ? null : l.n)}>{formatarNum(l.n)} ▾</Botao> },
           { id: "ant", titulo: "Saiu no anterior?", render: l => (l.anterior ? "sim" : "não") },
           { id: "atraso", titulo: "Atraso", alinhar: "right", mono: true },
           { id: "f10", titulo: "Nos últimos 10", alinhar: "right", mono: true, render: l => `${l.f10}/10` },
-          { id: "prob", titulo: "Prob. prevista", alinhar: "right", mono: true, render: l => pct(l.prob, 2) },
+          { id: "taxa", titulo: "Taxa da dezena até ali", alinhar: "right", mono: true, render: l => pct(l.ex.taxaDezena, 1) },
+          { id: "forte", titulo: "Evidência mais forte antes", render: l => { const c = l.ex.maisForte; return <div><div style={{ fontSize: 12 }}>{c.descricao}</div><div style={{ fontSize: 11, fontFamily: T.mono, color: Math.abs(c.z) > Z_LIMIAR ? T.goldText : T.textMuted }}>{pct(c.taxa, 1)} em {c.vezes.toLocaleString("pt-BR")}× · z {c.z >= 0 ? "+" : ""}{dec(c.z, 1)}</div></div>; } },
+          { id: "pc", titulo: "Pelas condições", alinhar: "right", mono: true, render: l => pct(l.ex.pCondicional, 1) },
+          { id: "prob", titulo: "Prob. do motor", alinhar: "right", mono: true, render: l => pct(l.prob, 2) },
           { id: "pos", titulo: "Posição", alinhar: "right", mono: true, render: l => `${l.pos}º${l.noJogo ? " · no jogo" : ""}` },
           { id: "saiu", titulo: "Saiu?", render: l => (l.saiu ? <Chip tom={l.noJogo ? "bom" : "alerta"}>saiu{l.noJogo ? "" : " (fora do jogo)"}</Chip> : <Chip>não</Chip>) },
         ]} linhas={ordenado.map(c => ({ ...c, __id: c.n }))} />
+        {dAberta && <PorQueSaiu d={dAberta} concurso={reg.concurso} />}
       </div>
+
+      <div style={{ marginTop: 14 }}>
+        <Rotulo>Por que saiu? · o que o passado dizia sobre as sorteadas</Rotulo>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+          <Metrica rotulo="Prob. pelas condições · sorteadas" valor={pct(mediaCond(sorteadas), 1)} detalhe={`não sorteadas: ${pct(mediaCond(naoSorteadas), 1)}`} tom={mediaCond(sorteadas) > mediaCond(naoSorteadas) ? "bom" : "ruim"} />
+          <Metrica rotulo="Dezenas com evidência forte" valor={comLimiar.length} detalhe={`|z| > ${dec(Z_LIMIAR, 1)} (${NHIPOTESES.toLocaleString("pt-BR")} condições)`} />
+        </div>
+        <Aviso tom={comLimiar.length ? "alerta" : "info"}>
+          {comLimiar.length
+            ? `${comLimiar.map(c => formatarNum(c.n)).join(", ")} estava(m) numa condição com evidência acima do limiar antes deste concurso. Abra a dezena (▾) para ver qual e quanto ela rendeu.`
+            : `Antes do concurso ${reg.concurso}, nenhuma das ${NHIPOTESES.toLocaleString("pt-BR")} condições (atraso, sequência, últimos 10, padrão, vizinhos, pares com o anterior e o penúltimo, atraso de cada dezena) tinha evidência acima do limiar. As sorteadas saíram sem uma causa detectável no passado. Clique numa dezena (▾) para ver cada condição e quanto ela rendia até ali.`}
+        </Aviso>
+      </div>
+      <VarreduraSinais sorteios={sorteios} />
     </Card>
   );
 }

@@ -95,3 +95,23 @@ test("annealing quântico simulado: portfólio válido e não pior que o clássi
   }
   assert.ok(q <= c + 0.05, `quântico ${q} × clássico ${c}`);
 });
+
+test("condições: explicação do concurso t só usa concursos anteriores e detecta sinal plantado", async () => {
+  const { criarVarredor, explicarConcurso, varrerSinais } = await import("../src/quantico/condicoes.js");
+  const { rng, embaralhar } = await import("../src/estatistica/matematica.js");
+  const r = rng(5), base = Array.from({ length: 1200 }, () => embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15));
+  const futuroTrocado = base.map((d, t) => (t > 800 ? embaralhar(Array.from({ length: 25 }, (_, i) => i + 1), r).slice(0, 15) : d));
+  const a = explicarConcurso(criarVarredor(base), 800), b = explicarConcurso(criarVarredor(futuroTrocado), 800);
+  assert.deepEqual(a.map(d => d.pCondicional), b.map(d => d.pCondicional));
+  // Plantado: se 3 saiu no anterior, 7 sai no atual com mais frequência.
+  const plantado = [base[0]];
+  for (let t = 1; t < base.length; t++) {
+    let d = base[t];
+    if (plantado[t - 1].includes(3) && !d.includes(7) && r() < 0.8) d = [...d.filter(x => x !== d.find(y => y !== 3)), 7];
+    plantado.push(d);
+  }
+  const res = await varrerSinais(plantado);
+  assert.ok(res.destaques.some(h => h.confirmada && h.dezena === 7 && /03 saiu no anterior/.test(h.descricao)));
+  const acaso = await varrerSinais(base);
+  assert.equal(acaso.confirmadas, 0);
+});
