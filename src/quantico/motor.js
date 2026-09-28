@@ -55,7 +55,7 @@ export function criarEstado(familiasAtivas = null, ctx = { sorteios: [] }, banco
   for (const f of FAMILIAS) {
     if (!ativa(f.id) || f.id === "evolucao") continue;
     if (f.id === "nulo") add("nulo", f.nome, nulo());
-    else if (f.feats) add(f.id, f.nome, logistico(f.feats, f.id === "todos" ? { lr: 0.01, l2: 0.02 } : { lr: 0.03, l2: 0.001 }));
+    else if (f.feats) add(f.id, f.nome, logistico(f.feats, f.id === "todos" ? { lr: 0.01, l2: 0.02 } : { lr: 0.01, l2: 0.001 }));
     else if (f.id === "regime") add("regime", f.nome, regime());
     else if (f.id === "boltzmann") add("boltzmann", f.nome, boltzmann(ctx));
     else if (f.id === "neural") add("neural", f.nome, neural());
@@ -144,7 +144,7 @@ function cicloEvolucao(estado, t, concursos) {
     if (vivos.some(v => v.nome === desc)) continue;
     // Entra em "período de prova": 1% do peso total, e perda inicial igual à do nulo.
     const max = Math.max(...estado.especialistas.map(e => e.logw));
-    estado.especialistas.push({ familia: "evolucao", nome: desc, genoma: p.g, esp: p.esp, logw: max + Math.log(0.01), perda: nulo.perda, perdaTotal: 0, criadoEm: t });
+    estado.especialistas.push({ familia: "evolucao", nome: desc, genoma: p.g, esp: p.esp, logw: max + Math.log(0.01), perda: nulo.perda, perdaTotal: 0, nuloNoNascimento: nulo.perdaTotal, criadoEm: t });
     promovidos.push({ nome: desc, treino: p.treino, validacao: p.validacao });
   }
   // Limite de evoluídos vivos: saem os que estão em quarentena e, se sobrar
@@ -191,7 +191,18 @@ function iniciarReplay(sorteios, opcoes) {
       res.perdaMistura += perdaLog(prev.probs, s);
       res.perdaNula += perdaLog(new Array(26).fill(0.6), s);
       res.n++;
-      if (guardarRegistros) res.registros.push({ concurso: concursos ? concursos[t] : t + 1, probs: prev.probs, sorteio: sorteios[t], jogo: prev.jogo, acertos: a });
+      if (guardarRegistros) {
+        // Quanto cada família empurrou cada dezena ANTES do sorteio (para a
+        // máquina do tempo mostrar quem apontou para o que saiu).
+        const contrib = {};
+        for (const [f, v] of Object.entries(prev.porFamilia)) {
+          if (f === "nulo") continue;
+          const c = new Float32Array(26);
+          for (let k = 1; k <= 25; k++) c[k] = v.p[k] - v.peso * 0.6;
+          contrib[f] = c;
+        }
+        res.registros.push({ t, concurso: concursos ? concursos[t] : t + 1, probs: prev.probs, sorteio: sorteios[t], jogo: prev.jogo, acertos: a, confianca: prev.confianca, contrib });
+      }
       if (baselines) { const jb = jogosBaseline(bancoUsado.X, t); for (const b of Object.keys(BASELINES)) res.acertosBaseline[b].push(jb[b].filter(x => s.has(x)).length); }
       if (guardarRegistros && t >= T - janelaRedundancia) {
         estado.especialistas.forEach((e, i) => {
@@ -235,7 +246,7 @@ export function governanca(estado) {
     const es = estado.especialistas.filter(e => e.familia === f);
     if (!es.length) return { familia: f, status: f === "evolucao" && estado.evolui ? "Aguardando" : "Desativada" };
     const melhor = es.reduce((a, b) => (b.perda < a.perda ? b : a));
-    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: nulo.perdaTotal - Math.min(...es.map(e => e.perdaTotal)), emSombra: es.every(e => emQuarentena(estado, e)), n: es.length };
+    return { familia: f, vantagemRecente: nulo.perda - melhor.perda, vantagemTotal: Math.max(...es.map(e => nulo.perdaTotal - (e.nuloNoNascimento || 0) - e.perdaTotal)), emSombra: es.every(e => emQuarentena(estado, e)), n: es.length };
   });
   const ativas = linhas.filter(l => l.vantagemRecente != null);
   const campea = ativas.reduce((a, b) => (b.vantagemRecente > (a?.vantagemRecente ?? -Infinity) ? b : a), null);

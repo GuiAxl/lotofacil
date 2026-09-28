@@ -96,6 +96,108 @@ function MapaEvidencias({ previsao, selecionada, onSelecionar }) {
   );
 }
 
+// Máquina do tempo: um concurso por vez. O motor só enxerga o que saiu ANTES
+// dele; aqui se vê o passado que ele usou, a previsão, o que saiu e quem acertou.
+function MaquinaDoTempo({ res, sorteios, concursos }) {
+  const regs = res.registros;
+  const [i, setI] = useState(regs.length - 1);
+  const [ordem, setOrdem] = useState("prob");
+  const reg = regs[Math.max(0, Math.min(regs.length - 1, i))];
+  if (!reg) return null;
+  const t = reg.t, saiu = new Set(reg.sorteio), jogoSet = new Set(reg.jogo);
+  const antes = sorteios.slice(Math.max(0, t - 10), t).map((d, k) => ({ concurso: concursos[Math.max(0, t - 10) + k], set: new Set(d) }));
+  const ranking = Array.from({ length: 25 }, (_, k) => k + 1).sort((a, b) => reg.probs[b] - reg.probs[a]);
+  const posicao = n => ranking.indexOf(n) + 1;
+  // Contexto de cada dezena calculado só com o passado.
+  const ctx = Array.from({ length: 25 }, (_, k) => {
+    const n = k + 1;
+    let atraso = 0;
+    for (let j = t - 1; j >= 0 && !sorteios[j].includes(n); j--) atraso++;
+    const f10 = sorteios.slice(Math.max(0, t - 10), t).filter(d => d.includes(n)).length;
+    return { n, anterior: t > 0 && sorteios[t - 1].includes(n), atraso, f10, prob: reg.probs[n], pos: posicao(n), saiu: saiu.has(n), noJogo: jogoSet.has(n) };
+  });
+  const ordenado = [...ctx].sort((a, b) => (ordem === "prob" ? b.prob - a.prob : ordem === "saiu" ? (b.saiu - a.saiu) || (b.prob - a.prob) : a.n - b.n));
+  const posMediaSorteadas = ctx.filter(c => c.saiu).reduce((a, c) => a + c.pos, 0) / 15;
+  let aucPar = 0;
+  for (const a of ctx) if (a.saiu) for (const b of ctx) if (!b.saiu) aucPar += a.prob > b.prob ? 1 : a.prob === b.prob ? 0.5 : 0;
+  const repetidas = ctx.filter(c => c.saiu && c.anterior).length;
+  const quem = Object.entries(reg.contrib).map(([f, c]) => {
+    let sim = 0, nao = 0;
+    for (let n = 1; n <= 25; n++) saiu.has(n) ? (sim += c[n]) : (nao += c[n]);
+    return { familia: f, placar: sim / 15 - nao / 10 };
+  }).sort((a, b) => b.placar - a.placar);
+  const vizinhos = regs.slice(Math.max(0, i - 25), i + 26);
+  return (
+    <Card titulo="Máquina do tempo · concurso a concurso">
+      <div style={{ fontSize: 13, color: T.textSoft, marginBottom: 10 }}>Para cada concurso o motor só enxerga o que saiu <b style={{ color: T.goldText }}>antes</b> dele. Escolha um concurso e veja o passado que ele usou, o que previu, o que saiu e quem apontou certo.</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <Botao pequeno variante="discreto" onClick={() => setI(Math.max(0, i - 1))}>◀</Botao>
+        <input style={{ ...estiloInput, width: 90, fontFamily: T.mono }} value={reg.concurso} onChange={e => { const c = Number(e.target.value.replace(/\D/g, "")); const k = regs.findIndex(r => r.concurso === c); if (k >= 0) setI(k); }} />
+        <Botao pequeno variante="discreto" onClick={() => setI(Math.min(regs.length - 1, i + 1))}>▶</Botao>
+        <input type="range" min={0} max={regs.length - 1} value={i} onChange={e => setI(Number(e.target.value))} style={{ flex: "1 1 200px" }} />
+      </div>
+      <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 44, marginBottom: 14 }}>
+        {vizinhos.map(r => (
+          <div key={r.concurso} onClick={() => setI(regs.indexOf(r))} title={`${r.concurso}: ${r.acertos} acertos`}
+            style={{ flex: 1, cursor: "pointer", height: `${((r.acertos - 5) / 8) * 100}%`, minHeight: 3, borderRadius: "3px 3px 0 0", background: r === reg ? T.gold : r.acertos >= 11 ? T.bom : r.acertos >= 9 ? T.serie1 : T.textMuted }} />
+        ))}
+      </div>
+
+      <Rotulo>O que saiu antes do concurso {reg.concurso} (últimos 10 — é isto que o motor enxerga)</Rotulo>
+      <div style={{ overflowX: "auto", marginBottom: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: `52px repeat(25, minmax(16px, 1fr))`, gap: 2, fontSize: 10, minWidth: 480 }}>
+          <div />
+          {Array.from({ length: 25 }, (_, k) => <div key={k} style={{ textAlign: "center", fontFamily: T.mono, color: saiu.has(k + 1) ? T.goldText : T.textMuted, fontWeight: saiu.has(k + 1) ? 700 : 400 }}>{formatarNum(k + 1)}</div>)}
+          {antes.map(a => [
+            <div key={a.concurso} style={{ fontFamily: T.mono, color: T.textMuted }}>{a.concurso}</div>,
+            ...Array.from({ length: 25 }, (_, k) => <div key={`${a.concurso}${k}`} style={{ height: 14, borderRadius: 3, background: a.set.has(k + 1) ? T.serie1 : T.surface2 }} />),
+          ])}
+          <div style={{ fontFamily: T.mono, color: T.goldText, fontWeight: 700 }}>{reg.concurso}</div>
+          {Array.from({ length: 25 }, (_, k) => <div key={`r${k}`} title={saiu.has(k + 1) ? "saiu" : ""} style={{ height: 14, borderRadius: 3, background: saiu.has(k + 1) ? T.gold : "transparent", border: `1px solid ${saiu.has(k + 1) ? T.gold : T.border}` }} />)}
+        </div>
+        <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 4 }}>Azul = saiu naquele concurso · dourado = resultado do concurso {reg.concurso} (o motor NÃO via esta linha ao prever).</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <Metrica rotulo="Acertos do jogo previsto" valor={reg.acertos} tom={reg.acertos >= 11 ? "bom" : reg.acertos < 9 ? "ruim" : undefined} detalhe="acaso = 9" />
+        <Metrica rotulo="Posição média das sorteadas" valor={dec(posMediaSorteadas, 1)} detalhe="no ranking do motor · acaso = 13,0" tom={posMediaSorteadas < 12 ? "bom" : undefined} />
+        <Metrica rotulo="AUC deste concurso" valor={dec(aucPar / 150, 3)} detalhe="0,5 = acaso" />
+        <Metrica rotulo="Repetiram do anterior" valor={repetidas} detalhe="esperado 9" />
+        <Metrica rotulo="Confiança na hora" valor={pct(reg.confianca)} />
+      </div>
+      <Rotulo>Jogo previsto (verde = acertou)</Rotulo>
+      <Bolinhas numeros={reg.jogo} destaque={reg.sorteio} />
+
+      <div style={{ marginTop: 14 }}>
+        <Rotulo>Quem apontou para o que saiu</Rotulo>
+        <Tabela colunas={[
+          { id: "familia", titulo: "Família", render: l => nomeFamilia(l.familia) },
+          { id: "placar", titulo: "Empurrou as sorteadas − as não sorteadas", alinhar: "right", mono: true, render: l => <span style={{ color: l.placar > 0 ? T.bom : l.placar < 0 ? T.ruim : T.text }}>{l.placar >= 0 ? "+" : ""}{dec(l.placar * 100, 4)} p.p.</span> },
+          { id: "v", titulo: "", render: l => (Math.abs(l.placar) < 1e-7 ? <Chip>sem peso</Chip> : l.placar > 0 ? <Chip tom="bom">apontou certo</Chip> : <Chip tom="ruim">apontou errado</Chip>) },
+        ]} linhas={quem.map(q => ({ ...q, __id: q.familia }))} />
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Rotulo>Cada dezena: o que se sabia antes × o que aconteceu</Rotulo>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[["prob", "por probabilidade"], ["saiu", "sorteadas primeiro"], ["n", "por dezena"]].map(([k, r]) => <Botao key={k} pequeno variante={ordem === k ? "secundario" : "discreto"} onClick={() => setOrdem(k)}>{r}</Botao>)}
+          </div>
+        </div>
+        <Tabela colunas={[
+          { id: "n", titulo: "Dezena", mono: true, render: l => formatarNum(l.n) },
+          { id: "ant", titulo: "Saiu no anterior?", render: l => (l.anterior ? "sim" : "não") },
+          { id: "atraso", titulo: "Atraso", alinhar: "right", mono: true },
+          { id: "f10", titulo: "Nos últimos 10", alinhar: "right", mono: true, render: l => `${l.f10}/10` },
+          { id: "prob", titulo: "Prob. prevista", alinhar: "right", mono: true, render: l => pct(l.prob, 2) },
+          { id: "pos", titulo: "Posição", alinhar: "right", mono: true, render: l => `${l.pos}º${l.noJogo ? " · no jogo" : ""}` },
+          { id: "saiu", titulo: "Saiu?", render: l => (l.saiu ? <Chip tom={l.noJogo ? "bom" : "alerta"}>saiu{l.noJogo ? "" : " (fora do jogo)"}</Chip> : <Chip>não</Chip>) },
+        ]} linhas={ordenado.map(c => ({ ...c, __id: c.n }))} />
+      </div>
+    </Card>
+  );
+}
+
 function PainelOmega({ ins }) {
   const bz = ins.boltzmann;
   const maxIdade = Math.max(1, ...ins.regimes.map(r => r.idade));
@@ -244,6 +346,8 @@ function Previsao({ sorteios, concursos, proximo, acoes }) {
         ]} linhas={gov.map(g => ({ ...g, __id: g.familia }))} />
         <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Champion: melhor família com vantagem recente &gt; 2 nats (fator de Bayes &gt; 7) sobre o acaso · Challenger: vantagem positiva · Watch: empate com o acaso · Quarantine: mais de 2 nats pior que o acaso, fora da mistura, aprendendo em sombra até melhorar ("evolui ou sai").</div>
       </Card>
+
+      <MaquinaDoTempo res={atual} sorteios={sorteios} concursos={concursos} />
 
       {inspecao && <PainelOmega ins={inspecao} />}
 
